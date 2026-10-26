@@ -1,0 +1,1107 @@
+:root {
+  --bg: #f7f6f3;
+  --panel: #ffffff;
+  --panel-2: #f1efe8;
+  --text: #1f1e1c;
+  --text-2: #5f5e5a;
+  --text-3: #888780;
+  --border: rgba(0, 0, 0, 0.1);
+  --border-strong: rgba(0, 0, 0, 0.2);
+  --accent: #185fa5;
+  --accent-bg: #e6f1fb;
+  --ok: #0f6e56;
+  --warn: #854f0b;
+  --warn-bg: #faeeda;
+  --danger: #a32d2d;
+  --danger-bg: #fcebeb;
+  --radius: 8px;
+  color-scheme: light dark;
+}
+
+/* Dark: warm near-black with an amber accent. Chosen in Settings → 外观; the
+   main process sets the window's theme, which is what this query follows. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #100e0b;
+    --panel: #17140f;
+    --panel-2: #221e17;
+    --text: #f2ece1;
+    --text-2: #bfb3a0;
+    --text-3: #857a68;
+    --border: rgba(255, 236, 200, 0.08);
+    --border-strong: rgba(255, 236, 200, 0.18);
+    --accent: #e0a94a;
+    --accent-bg: rgba(224, 169, 74, 0.13);
+    --ok: #7cc68a;
+    --warn: #e9be6a;
+    --warn-bg: rgba(233, 190, 106, 0.12);
+    --danger: #ef8a7c;
+    --danger-bg: rgba(239, 138, 124, 0.13);
+    --radius: 10px;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--text);
+  color: var(--bg);
+  border-color: transparent;
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+}
+
+textarea {
+  resize: vertical;
+}
+
+/* The window never scrolls as a whole: each column scrolls on its own, so
+   there is never a second scrollbar beside a column's. */
+.app {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
+.sidebar {
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* A long team name is cut with … (the whole name is its tooltip), never spilling into the page. */
+.team-name > .name,
+.team-item > .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand {
+  padding: 14px 16px;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.label {
+  color: var(--text-3);
+  font-size: 12px;
+  padding: 10px 16px 4px;
+}
+
+.team-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 16px;
+  cursor: pointer;
+  color: var(--text-2);
+  border: none;
+  background: none;
+  border-radius: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.team-item.selected {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--text-3);
+}
+
+.dot.busy {
+  background: var(--ok);
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.header {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.muted {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
+/* The discussion and, over its bottom-right corner, the two jump buttons. */
+.transcript-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.transcript {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+.jump {
+  position: absolute;
+  right: 22px;
+  bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.jump button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.jump button:disabled {
+  opacity: 0.3;
+}
+
+.font-scale input[type="range"] {
+  width: 220px;
+  padding: 0;
+  border: none;
+  background: none;
+  accent-color: var(--accent);
+}
+
+.msg {
+  margin-bottom: 16px;
+  max-width: 900px;
+}
+
+.msg .who {
+  font-size: 12px;
+  color: var(--text-3);
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.msg .who strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.msg .body {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg.failed .body {
+  color: var(--danger);
+}
+
+.link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.link:hover:not(:disabled) {
+  background: none;
+  text-decoration: underline;
+}
+
+.request {
+  margin-top: 6px;
+  background: var(--panel-2);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  font-size: 12px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.composer {
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  padding: 12px 20px;
+}
+
+.composer .row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.error {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  margin: 8px 0;
+  white-space: pre-wrap;
+}
+
+.notice {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  margin: 8px 16px;
+  font-size: 12px;
+}
+
+.form {
+  padding: 24px;
+  max-width: 560px;
+}
+
+.form h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 16px;
+}
+
+.field {
+  margin-bottom: 14px;
+}
+
+.field > span {
+  display: block;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 4px;
+}
+
+.team {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.side {
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  overflow-y: auto;
+}
+
+.panel {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.meter {
+  height: 6px;
+  background: var(--panel-2);
+  border-radius: 3px;
+  margin: 8px 0;
+  overflow: hidden;
+}
+
+.meter > div {
+  height: 100%;
+  background: var(--accent);
+}
+
+/* A row of controls wraps when its column runs out of room — never spills into
+   the next column (a long option text or a long button label used to). */
+.row-gap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0;
+}
+
+.row-gap > select,
+.seat-row > select,
+.pick-row > select {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.seat-row > input:not(.narrow) {
+  flex: 1 1 160px;
+  width: auto;
+  min-width: 0;
+}
+
+.row-gap > button,
+.seat-row > button,
+.pick-row > button {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.msg.system .body {
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.msg.checkpoint {
+  border-left: 3px solid var(--accent);
+  padding-left: 10px;
+}
+
+.msg.checkpoint.revoked {
+  border-left-color: var(--text-3);
+  opacity: 0.75;
+}
+
+.commands {
+  margin-bottom: 8px;
+}
+
+.command {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.mention-menu {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.seat-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.seat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.check {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.check input {
+  width: auto;
+}
+
+select {
+  max-width: 100%;
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+}
+
+.command-result {
+  background: var(--panel-2);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  max-height: 260px;
+  overflow: auto;
+  font-size: 13px;
+}
+
+.command-result .body {
+  white-space: pre-wrap;
+}
+
+.empty {
+  margin: auto;
+  text-align: center;
+  color: var(--text-3);
+}
+
+/* ── library pages ─────────────────────────────────────────────────── */
+
+.main.scroll {
+  overflow-y: auto;
+}
+
+.page {
+  padding: 24px;
+  max-width: 640px;
+  min-width: 0;
+}
+
+.page h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+
+.two-column {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .two-column {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.section-title {
+  font-size: 12px;
+  color: var(--text-2);
+  margin: 16px 0 6px;
+  font-weight: 600;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 10px 12px;
+  margin: 10px 0;
+}
+
+.card-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.list-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.badge {
+  font-size: 12px;
+  border-radius: var(--radius);
+  padding: 0 8px;
+}
+
+.badge.ok {
+  color: var(--ok);
+}
+
+.badge.bad {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.link.danger {
+  color: var(--danger);
+}
+
+.error.inline {
+  display: inline-block;
+  margin: 0 0 0 8px;
+  padding: 2px 8px;
+}
+
+.notice.inline {
+  margin: 8px 0;
+}
+
+.notice.inline-hint {
+  display: inline-block;
+  margin: 0;
+  padding: 1px 8px;
+}
+
+/* A connection that cannot work yet, said in the list where it is picked. */
+option.unready {
+  color: var(--text-3);
+}
+
+.check.block {
+  display: flex;
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+}
+
+.swatch.on {
+  border-color: var(--text);
+}
+
+.report {
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+.report .bad {
+  color: var(--danger);
+}
+
+.report .good {
+  color: var(--ok);
+}
+
+.pick-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.seat-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  text-align: left;
+}
+
+.seat-head:hover:not(:disabled) {
+  background: none;
+}
+
+.seat-body {
+  margin-top: 8px;
+}
+
+.seat-body select,
+.page select,
+.form select {
+  max-width: 100%;
+}
+
+input.narrow {
+  width: 110px;
+}
+
+.seat-card .muted {
+  font-size: 12px;
+}
+
+.team-list .team-item {
+  padding: 0;
+}
+
+.team-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  border-radius: 0;
+  padding: 7px 16px;
+  text-align: left;
+  color: inherit;
+}
+
+.team-name:hover:not(:disabled) {
+  background: none;
+}
+
+.order {
+  display: inline-flex;
+  gap: 6px;
+  padding-right: 10px;
+}
+
+.team-list > button.team-item {
+  padding: 7px 16px;
+}
+
+/* ── sessions under a team ───────────────────────────────────────────── */
+
+.team-item.open {
+  color: var(--text);
+}
+
+.team-item.session {
+  padding: 4px 16px 4px 34px;
+  font-size: 13px;
+}
+
+.team-item.session .dot {
+  width: 6px;
+  height: 6px;
+}
+
+.team-item.session.add {
+  color: var(--text-3);
+}
+
+.team-item.session.add:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.team-name .count {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 6px;
+  line-height: 16px;
+}
+
+.session-tag {
+  margin-left: 10px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--accent);
+}
+
+.session-actions {
+  margin: 2px 0 0;
+  font-size: 12px;
+}
+
+.session-actions input {
+  max-width: 240px;
+}
+
+/* ── discussion: Markdown, quotes, pictures ─────────────────────────── */
+
+.msg.seat {
+  border-left: 3px solid transparent;
+  padding-left: 10px;
+}
+
+.msg.quoted {
+  background: var(--accent-bg);
+  border-radius: var(--radius);
+}
+
+.markdown {
+  word-break: break-word;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol {
+  margin: 0.4em 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  font-size: 1em;
+  margin: 0.8em 0 0.3em;
+}
+
+.markdown table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  display: block;
+  overflow-x: auto;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border-strong);
+  padding: 3px 8px;
+  text-align: left;
+}
+
+.markdown blockquote {
+  margin: 0.4em 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-2);
+}
+
+.markdown code {
+  font-family: Consolas, "Cascadia Mono", Menlo, monospace;
+  font-size: 0.92em;
+  background: var(--panel-2);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.code-block {
+  position: relative;
+  margin: 0.5em 0;
+}
+
+.code-block pre {
+  background: var(--panel-2);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 0;
+}
+
+.code-block pre code {
+  background: none;
+  padding: 0;
+}
+
+.code-block .copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 11px;
+  padding: 1px 8px;
+  opacity: 0.7;
+}
+
+/* Highlight colours from the app's own palette, so light and dark both read. */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in {
+  color: var(--accent);
+}
+
+.hljs-string,
+.hljs-attr,
+.hljs-template-string {
+  color: var(--ok);
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-title {
+  color: var(--warn);
+}
+
+.local-image {
+  margin: 8px 0;
+}
+
+.local-image img {
+  max-width: 100%;
+  max-height: 420px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.local-image figcaption {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+/* The side column never scrolls sideways: long paths wrap, controls shrink. */
+.side {
+  overflow-x: hidden;
+}
+
+.side .row-gap select {
+  flex: 1;
+  min-width: 0;
+}
+
+button {
+  white-space: nowrap;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 4px 0 8px;
+}
+
+.chip.accent {
+  border-color: var(--accent);
+}
+
+.chip.warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.material {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.material .local-image {
+  flex-basis: 100%;
+}
+
+.draft {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  margin-top: 8px;
+}
+
+.audit-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  padding: 3px 0;
+}
+
+.pill {
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 0 8px;
+}
+
+.plan-list {
+  margin: 4px 0;
+  padding-left: 20px;
+  font-size: 12px;
+}
+
+.transcript {
+  padding-bottom: 24px;
+}
+
+/* ── agendas ─────────────────────────────────────────────────────────── */
+
+.draft-card {
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 10px 12px;
+  margin: 10px 0;
+  max-width: 900px;
+}
+
+.draft-card .task {
+  border-top: 1px dashed var(--border);
+  padding-top: 6px;
+  margin-top: 6px;
+}
+
+.panel.callout {
+  background: var(--warn-bg);
+}
+
+.card.decision {
+  border-color: var(--warn);
+}
+
+input.mono,
+code {
+  font-family: Consolas, "Cascadia Mono", Menlo, monospace;
+}
+
+.tool-row {
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+
+/* Startup: over the window until it steps aside. */
+.startup {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+.startup-card {
+  min-width: 360px;
+  max-width: 560px;
+  padding: 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.startup-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+  line-height: 1.9;
+}
+.ok-mark {
+  color: var(--ok);
+}
+.warn-mark {
+  color: var(--warn);
+}
+
+/* Dark-only touches, last so they win over the base rules above. */
+@media (prefers-color-scheme: dark) {
+  /* Amber outline for the main action, as on the reference's 「Contact support」. */
+  button.primary {
+    background: transparent;
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  button.primary:hover:not(:disabled) {
+    background: var(--accent-bg);
+  }
+
+  /* The chosen item in the sidebar: amber text and a bar on its edge. */
+  .team-item.selected {
+    color: var(--accent);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+
+  .meter > div {
+    background: var(--accent);
+  }
+
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 236, 200, 0.14);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}

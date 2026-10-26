@@ -1,0 +1,60 @@
+# How Squad is packaged into an installer (design doc §13, phase 6).
+#
+# Windows first (§15 Q4): a per-user NSIS installer — no administrator
+# prompt, installs under %LOCALAPPDATA%\Programs\Squad, and its Start Menu
+# shortcut carries the app id below, which is what Windows needs before it
+# will show Squad's notifications at all.
+# macOS second: a dmg, built on a Mac (it cannot be built from Windows).
+
+appId: com.squad.desktop
+productName: Squad
+copyright: Copyright © 2026 jettsquad
+
+directories:
+  output: release
+  buildResources: build
+
+# The built app only: sources, tests and docs stay out. Production
+# dependencies (the document readers the main process loads) are added by
+# electron-builder from package.json on its own.
+files:
+  - out/**
+  - package.json
+
+# The download tool is a separate process a seat's CLI starts with Squad's own
+# executable in Node mode; it reads its script from disk, so the script lives
+# outside the archive (download-tool.ts looks there first).
+asarUnpack:
+  - out/main/download-mcp.js
+
+# The icon as a plain file: the installer names it as Squad's notification icon
+# (build/installer.nsh).
+extraResources:
+  - from: build/icon.png
+    to: icon.png
+
+# The Electron already installed for development, rather than another download.
+electronDist: node_modules/electron/dist
+
+win:
+  target: nsis
+  icon: build/icon.png
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Squad
+  # Squad's data (teams, the agent library, keys) is the person's, not the
+  # program's: uninstalling must not take it.
+  deleteAppDataOnUninstall: false
+
+mac:
+  target: dmg
+  icon: build/icon.png
+  category: public.app-category.productivity
+  extendInfo:
+    # Without it macOS refuses the microphone outright, and dictation records silence.
+    NSMicrophoneUsageDescription: Squad 用麦克风听写：录下你说的话，交给你在设置里选的语音转文字服务，文字填进输入框，不会自动发送。

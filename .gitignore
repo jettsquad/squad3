@@ -1,0 +1,9 @@
+node_modules/
+out/
+dist/
+release/
+*.tsbuildinfo
+.DS_Store
+
+# 仅供本地参考的上游文档。
+docs/squad2-reference/
