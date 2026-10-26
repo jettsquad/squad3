@@ -1,0 +1,9 @@
+node_modules/
+out/
+dist/
+release/
+*.tsbuildinfo
+.DS_Store
+
+# 2.x 文档的副本：个人资产，原件在 J:\project\Squad\docs。2.x 的仓库同样不提交 docs/。
+docs/squad2-reference/
