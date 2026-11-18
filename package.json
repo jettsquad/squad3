@@ -1,7 +1,7 @@
 {
   "name": "squad",
   "productName": "Squad",
-  "version": "3.0.0-dev.1",
+  "version": "3.0.0-dev.3",
   "private": true,
   "description": "人主持的多 agent 圆桌：Squad 自己当宿主，Claude Code、Codex、dsh 都是席位。",
   "type": "module",

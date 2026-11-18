@@ -23,12 +23,28 @@ export type AuthMode = "subscription" | "api-key";
 /** Which CLI or channel a connection speaks through. */
 export type ConnectionBackend = "claude-code" | "codex" | "dsh";
 
+/** Transport credentials are SSH references; provider credentials remain on the server. */
+export interface CloudConnection {
+  readonly host: string;
+  readonly port: number;
+  readonly user: string;
+  readonly identityFile: string;
+  readonly knownHostsFile: string;
+  readonly executable: string;
+  readonly runAs: string;
+  /** Increment when the server profile's account changes. */
+  readonly revision: string;
+}
+
 export interface SeatConnection {
   readonly connectionId: string;
   /** What a person calls it. */
   readonly displayName: string;
   readonly authMode: AuthMode;
   readonly backend: ConnectionBackend;
+  /** Missing in all existing connections: interpreted as local, without rewriting them. */
+  readonly source?: "local" | "octopus" | undefined;
+  readonly cloud?: CloudConnection | undefined;
   readonly modelId?: string | undefined;
   /** api-key only. Empty means the backend's own default endpoint. */
   readonly endpoint?: string | undefined;
@@ -118,6 +134,33 @@ export interface ConnectionProblem {
 export function checkConnection(connection: SeatConnection): readonly ConnectionProblem[] {
   const problems: ConnectionProblem[] = [];
   if (connection.displayName.trim() === "") problems.push({ detail: "连接要有一个名字。" });
+
+  if (connection.source === "octopus") {
+    if (connection.backend !== "codex") problems.push({ detail: "云端来源目前支持 Codex，其他后端尚未接入。" });
+    const cloud = connection.cloud;
+    if (cloud === undefined) problems.push({ detail: "云端来源需要 SSH 和远端运行配置。" });
+    else {
+      if (!/^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(cloud.host))
+        problems.push({ detail: "云服务器地址只能填写主机名或 IPv4 地址。" });
+      if (!Number.isInteger(cloud.port) || cloud.port < 1 || cloud.port > 65535)
+        problems.push({ detail: "SSH 端口应在 1–65535 之间。" });
+      if (![cloud.user, cloud.runAs].every((s) => /^[A-Za-z_][A-Za-z0-9_-]*$/.test(s)))
+        problems.push({ detail: "SSH 用户和运行用户不合法。" });
+      if (
+        ![cloud.identityFile, cloud.knownHostsFile].every(
+          (s) => /^(?:[A-Za-z]:[\\/]|\/)/.test(s) && !/[\r\n\0]/.test(s),
+        )
+      )
+        problems.push({ detail: "SSH 密钥和主机记录须填写本机绝对路径。" });
+      if (!/^\/[A-Za-z0-9/_.,+-]+$/.test(cloud.executable) || cloud.executable.split("/").includes(".."))
+        problems.push({ detail: "云端运行程序须为绝对路径，不能填写 shell 命令。" });
+      if (!/^[A-Za-z0-9_.-]{1,80}$/.test(cloud.revision)) problems.push({ detail: "远端配置版本不合法。" });
+    }
+    if ([connection.endpoint, connection.credentialRef, connection.authHeader].some((v) => (v ?? "") !== ""))
+      problems.push({ detail: "云端模型的端点和密钥配置在服务器上，不使用本机模型凭据。" });
+    return problems;
+  }
+  if (connection.cloud !== undefined) problems.push({ detail: "本地来源不能携带云端配置。" });
 
   if (connection.authMode === "subscription") {
     // Refused rather than ignored. A stored endpoint that never takes effect
@@ -215,6 +258,7 @@ export function envForConnection(
   connection: SeatConnection,
   credential?: string | undefined,
 ): Readonly<Record<string, string>> {
+  if (connection.source === "octopus") return {};
   const names = ENV_NAMES[connection.backend];
   if (connection.authMode === "subscription") {
     // Nothing. Not the endpoint, not a token, and the model only when the

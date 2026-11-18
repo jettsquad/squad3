@@ -20,6 +20,8 @@ export interface ResolvedConnection {
 }
 
 export interface SeatRequest {
+  /** Host-owned scene identity for remote continuation isolation. */
+  readonly sessionScope?: string | undefined;
   readonly seat: SeatSpec;
   /** Absent means the host's own CLI login with the backend's default model. */
   readonly connection?: ResolvedConnection | undefined;

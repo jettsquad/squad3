@@ -42,6 +42,20 @@ const connection = z
     displayName: z.string().trim().min(1, "连接名不能是空的。"),
     authMode: z.enum(["subscription", "api-key"]),
     backend,
+    source: z.enum(["local", "octopus"]).optional(),
+    cloud: z
+      .object({
+        host: z.string(),
+        port: z.number().int().min(1).max(65535),
+        user: z.string(),
+        identityFile: z.string(),
+        knownHostsFile: z.string(),
+        executable: z.string(),
+        runAs: z.string(),
+        revision: z.string(),
+      })
+      .strict()
+      .optional(),
     modelId: z.string().optional(),
     endpoint: z.string().optional(),
     credentialRef: z.string().optional(),
@@ -396,6 +410,8 @@ export const methods = {
   "app.update.check": { input: z.object({}).strict(), output: z.object({}) },
   /** Install an already downloaded update and restart. */
   "app.update.install": { input: z.object({}).strict(), output: z.object({}) },
+  /** Choose a local release package and stage it in the normal updater, without Internet transfer. */
+  "app.update.local": { input: z.object({}).strict(), output: z.object({}) },
   /**
    * What starting up found: each backend's CLI (found where a seat would look,
    * or why not), the single-instance lock, and how the teams came back.

@@ -140,6 +140,30 @@ export function createAgentCheck(deps: AgentCheckDeps): AgentCheck {
         : { name: "席位后端", outcome: "fail", detail: backendProblem },
     );
 
+    if (connection?.source === "octopus") {
+      checks.push({
+        name: "命令行工具",
+        outcome: "unknown",
+        detail: "在云端检查运行时；讨论不要求本机安装或登录模型。",
+      });
+      checks.push({ name: "密钥", outcome: "skipped", detail: "模型凭据由云端管理，本机只使用 SSH 身份。" });
+      checks.push({
+        name: "地址可达",
+        outcome: "unknown",
+        detail: `通过 SSH 验证 ${connection.cloud?.host ?? "未配置"}，不把模型 API 地址当远端 agent。`,
+      });
+      const asked =
+        backendProblem === undefined
+          ? await probe(template, { connection, env: {} })
+          : { name: "真的问一句", outcome: "unknown" as const, detail: backendProblem };
+      if (asked.outcome === "ok") {
+        checks[1] = { name: "命令行工具", outcome: "ok", detail: "云端运行时已真实答复；本地工具能力需在项目中另验。" };
+        checks[3] = { name: "地址可达", outcome: "ok", detail: "SSH 认证及云端控制协议已通过。" };
+      }
+      checks.push(asked);
+      return { templateId, displayName: template.displayName, checks };
+    }
+
     // ② The CLI itself, found exactly as a seat would find it.
     if (typeof adapter === "string" || adapter.locate === undefined) {
       // Wanted to check and could not — evidence is missing, so `unknown`.

@@ -1293,6 +1293,7 @@ export function createTable(deps: TableDeps): Table {
         ...(resumeId === undefined ? {} : { resumeId }),
       });
       const result = await adapter.start({
+        sessionScope: teamId,
         seat,
         ...(connection === undefined ? {} : { connection }),
         cwd: team.projectFolder,
@@ -1314,7 +1315,12 @@ export function createTable(deps: TableDeps): Table {
     // again cures, so it is cured here rather than shown. The window is
     // REBUILT: a continuing seat was handed only what it had not seen, and a
     // fresh one must be handed everything.
-    if (turn.result.failed && !turn.result.cancelled && resumeWasRejected(turn.resumeId, turn.result.text)) {
+    if (
+      turn.result.failed &&
+      !turn.result.cancelled &&
+      (turn.result.resetSession === true ||
+        (connection?.connection.source !== "octopus" && resumeWasRejected(turn.resumeId, turn.result.text)))
+    ) {
       forgetSeatSession(teamId, seat.seatId);
       runtime.seenUpTo.delete(seat.seatId);
       lines = windowForSeat(team, seat, command.commandId);

@@ -321,3 +321,15 @@
 | console | agenda-text、agenda-verdict、backend-tools、earlier-lines、image、mention、mention-picker、notify、number-field、parse、roster-drift、seat-status、seat-sync、speech-pause、team-designer（15） | 原样为主；`notify` 改写（Electron Notification） |
 | console | team-sessions（1） | 不移植 |
 | migrate | read（1） | 改写：变成 3 的「从 2.x 导入」测试 |
+
+
+## U. 云端来源
+
+新增功能的约定与使用见 [cloud-source.md](cloud-source.md)。主进程真实 IPC 已验证团队读取、秘书协助与议程草拟；适配器真实续接通过，自动测试覆盖来源/权限/故障隔离。以下涉及界面手动操作，未因自动测试通过而勾选。
+
+| ✓ | 功能 | 状态 |
+| --- | --- | --- |
+| [ ] | 连接页新增本地/云端来源，保存与编辑 SSH/profile 配置 | 代码与 IPC 校验完成；控件树可读，截图工具超时，手动界面未完成 |
+| [ ] | Agent/席位选择云端连接，本地来源同时可用 | 主进程真实创建、保存、读取与并存已验证，界面未走 |
+| [ ] | 云端席位参与讨论和秘书任务，本地执行沿用权限 | 团队指令/秘书/议程真实调用通过，手动界面未走 |
+| [ ] | 远端探活、续接、取消及错误在界面展示 | 自动测试与适配器真实续接通过，手动界面未走 |

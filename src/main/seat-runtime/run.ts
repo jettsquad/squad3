@@ -35,6 +35,8 @@ export interface SeatOutcome {
 
 /** What one turn produced. */
 export interface SeatResult {
+  /** Structured pre-turn rejection: safe to rebuild a fresh context, before tools were dispatched. */
+  readonly resetSession?: boolean;
   /**
    * The answer, or — when there is none — why not. Never empty on failure,
    * except a cancelled run, which carries only what the seat had said (maybe nothing).

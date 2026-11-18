@@ -15,7 +15,7 @@ export {
   usageFromStderr,
   withoutHeartbeats,
 } from "./alive.ts";
-export { startChild, TailBuffer } from "./process.ts";
+export { startChild, TailBuffer, killTree } from "./process.ts";
 export { downloadMcpConfig } from "./download-tool.ts";
 export { DOWNLOAD_SERVER } from "./download-mcp.ts";
 export type { ChildExit, ChildSpec, RunningChild } from "./process.ts";

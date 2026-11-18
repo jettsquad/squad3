@@ -89,7 +89,7 @@ export interface RunningChild {
 const DEFAULT_MAX_STDOUT = 8 * 1024 * 1024;
 const DEFAULT_MAX_STDERR = 256 * 1024;
 
-function killTree(child: ChildProcess): void {
+export function killTree(child: ChildProcess): void {
   const pid = child.pid;
   if (pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
   if (process.platform === "win32") {

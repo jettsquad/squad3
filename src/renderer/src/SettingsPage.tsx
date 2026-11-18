@@ -347,6 +347,17 @@ export function SettingsPage(): JSX.Element {
           <>
             <div className="section-title">{t("软件更新")}</div>
             <div className="row-gap">
+              <button
+                type="button"
+                disabled={["checking", "available", "downloading"].includes(update.state)}
+                onClick={() => {
+                  void call("app.update.local", {}).catch((error: unknown) =>
+                    setUpdate({ state: "error", message: error instanceof Error ? error.message : String(error) }),
+                  );
+                }}
+              >
+                {t("从本地安装更新")}
+              </button>
               {update.state === "downloaded" ? (
                 <button
                   type="button"
@@ -373,7 +384,9 @@ export function SettingsPage(): JSX.Element {
               )}
               <span className="muted">{updateMessage()}</span>
             </div>
-            <p className="muted">{t("发现新版本后会自动下载；下载完成后点击重启并安装。")}</p>
+            <p className="muted">
+              {t("可在线检查，也可选择本机已有的更新包；本地包校验后直接用于安装，不上传或从互联网重下。")}
+            </p>
 
             <div className="section-title">{t("从 Squad 2.x 导入")}</div>
             <ImportPanel />

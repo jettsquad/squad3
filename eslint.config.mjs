@@ -12,10 +12,10 @@ import tseslint from "typescript-eslint";
  * another module's internals. `shared` and `main/seat-runtime` are libraries,
  * not modules, and the two allowed exceptions — as they were in 2.x.
  */
-const MODULES = ["table", "context", "secretary", "reasoning", "designer", "migrate", "library", "store", "vault", "seats", "extras", "ipc", "agent-check"];
+const MODULES = ["table", "context", "secretary", "reasoning", "designer", "migrate", "library", "store", "vault", "seats", "extras", "ipc", "agent-check", "updates"];
 
 export default tseslint.config(
-  { ignores: ["**/node_modules/**", ".electron-builder-cache/**", "out/**", "dist/**", "release/**"] },
+  { ignores: ["**/node_modules/**", ".electron-builder-cache/**", ".tmp/**", "out/**", "dist/**", "release/**"] },
   js.configs.recommended,
   { languageOptions: { globals: globals.node } },
   ...tseslint.configs.recommended,

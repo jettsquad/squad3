@@ -145,7 +145,7 @@ export function createLibrary(options: {
       // system does for itself (2.x §7.6). Only derived when none was chosen —
       // a chosen name is the "this key is already in my environment" case.
       const connection: SeatConnection =
-        input.authMode === "api-key" && (input.credentialRef ?? "").trim() === ""
+        input.source !== "octopus" && input.authMode === "api-key" && (input.credentialRef ?? "").trim() === ""
           ? { ...input, credentialRef: credentialRefFor(input.connectionId) }
           : input;
       const problems = checkConnection(connection);
@@ -184,6 +184,7 @@ export function createLibrary(options: {
     setCredential: (connectionId, value) => {
       const connection = connections.get(connectionId);
       if (connection === undefined) throw new Error(`没有这个连接：${connectionId}。`);
+      if (connection.source === "octopus") throw new Error("云端模型的密钥只在服务器配置。");
       const ref = (connection.credentialRef ?? "").trim();
       if (ref === "") throw new Error("这个连接没有凭据名。");
       options.vault.set(ref, value);
@@ -192,6 +193,7 @@ export function createLibrary(options: {
     envFor: (connectionId) => {
       const connection = connections.get(connectionId);
       if (connection === undefined) throw new Error(`没有这个连接：${connectionId}。`);
+      if (connection.source === "octopus") return {};
       if (connection.authMode === "subscription") return envForConnection(connection);
       const ref = (connection.credentialRef ?? "").trim();
       return envForConnection(connection, ref === "" ? undefined : options.vault.resolve(ref));

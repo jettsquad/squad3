@@ -121,6 +121,7 @@ export interface AppEnvironment {
   /** App updater actions, supplied by Electron only in the desktop build. */
   readonly checkForUpdates?: (() => Promise<void>) | undefined;
   readonly installUpdate?: (() => void) | undefined;
+  readonly prepareLocalUpdate?: (() => Promise<void>) | undefined;
   /**
    * Raise a system notification; clicking it brings this team up. Absent in
    * tests and wherever there is no desktop to raise one on.
@@ -392,6 +393,11 @@ export function compose(env: AppEnvironment): Composed {
     "app.update.install": async () => {
       if (env.installUpdate === undefined) throw new Error("当前环境不支持软件更新。");
       env.installUpdate();
+      return {};
+    },
+    "app.update.local": async () => {
+      if (env.prepareLocalUpdate === undefined) throw new Error("当前环境不支持本地更新。");
+      await env.prepareLocalUpdate();
       return {};
     },
     "app.startup": async () => {
@@ -772,6 +778,8 @@ export function compose(env: AppEnvironment): Composed {
     },
     "connections.list": async () => ({ connections: [...library.connections.views()] }),
     "connections.save": async ({ connection, credential }) => {
+      if (connection.source === "octopus" && (credential ?? "").trim() !== "")
+        throw new Error("云端模型凭据只在服务器配置，不保存在本机连接里。");
       // The connection first: a key with nowhere to go would be stored under
       // a name nothing reads.
       const saved = library.connections.save(connection);

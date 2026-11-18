@@ -30,10 +30,14 @@ import { TRAY_ICON_PNG_BASE64 } from "./tray-icon.ts";
 import { EVENT_CHANNEL, INVOKE_CHANNEL } from "../shared/wire.ts";
 import { compose } from "./compose.ts";
 import { createDispatcher } from "./ipc/index.ts";
+import { prepareLocalUpdate, type LocalUpdateFeed } from "./updates/index.ts";
+import { homedir } from "node:os";
 
 // The main bundle is an ES module, which has no `__dirname`.
 const here = dirname(fileURLToPath(import.meta.url));
 let updater: AppUpdater | undefined;
+let localUpdateFeed: LocalUpdateFeed | undefined;
+let updateBusy = false;
 
 function pushUpdate(data: {
   readonly state: "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error";
@@ -41,6 +45,7 @@ function pushUpdate(data: {
   readonly percent?: number;
   readonly message?: string;
 }): void {
+  updateBusy = ["checking", "available", "downloading"].includes(data.state);
   if (window !== undefined && !window.isDestroyed()) window.webContents.send(EVENT_CHANNEL, "app.update", data);
 }
 
@@ -315,7 +320,38 @@ void app.whenReady().then(() => {
         });
         return;
       }
+      if (updateBusy) throw new Error("更新正在处理中，请等待完成。");
+      if (localUpdateFeed !== undefined) {
+        await localUpdateFeed.close();
+        localUpdateFeed = undefined;
+        getUpdater().updateConfigPath = join(process.resourcesPath, "app-update.yml");
+      }
       await getUpdater().checkForUpdates();
+    },
+    prepareLocalUpdate: async () => {
+      if (!app.isPackaged || process.platform !== "win32") throw new Error("请在已安装的 Windows 版中使用本地更新。");
+      if (updateBusy) throw new Error("更新正在处理中，请等待完成。");
+      const picked = await dialog.showOpenDialog({
+        title: "选择本地 Squad 更新包（同目录需有 latest.yml）",
+        properties: ["openFile"],
+        filters: [{ name: "Squad 安装包", extensions: ["exe"] }],
+      });
+      if (picked.canceled || picked.filePaths[0] === undefined) return;
+      pushUpdate({ state: "checking" });
+      try {
+        await localUpdateFeed?.close();
+        const current = getUpdater();
+        localUpdateFeed = await prepareLocalUpdate({
+          source: picked.filePaths[0],
+          cacheDir: join(process.env["LOCALAPPDATA"] ?? join(homedir(), "AppData", "Local"), "squad-updater"),
+          isNewer: (version) => current.currentVersion.compare(version) < 0,
+        });
+        current.setFeedURL({ provider: "generic", url: localUpdateFeed.url });
+        await current.checkForUpdates();
+      } catch (error) {
+        pushUpdate({ state: "error", message: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
     },
     installUpdate: () => {
       if (!app.isPackaged || process.platform !== "win32") {

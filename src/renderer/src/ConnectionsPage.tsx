@@ -18,6 +18,18 @@ import type { ConnectionViewWire, ConnectionWire } from "../../shared/wire.ts";
 import { call, useAction } from "./api.ts";
 import { BACKEND_LABELS, libraryChanged, useLibrary } from "./library.ts";
 import { t } from "./locale.ts";
+import type { CloudConnection } from "../../shared/connection.ts";
+
+const emptyCloud = (): CloudConnection => ({
+  host: "",
+  port: 22,
+  user: "root",
+  identityFile: "",
+  knownHostsFile: "",
+  executable: "/opt/octopus-g0/bin/codex-minimax",
+  runAs: "octopus-g0",
+  revision: "1",
+});
 
 export function ConnectionsPage(): JSX.Element {
   const { library, error: loadError } = useLibrary();
@@ -30,6 +42,8 @@ export function ConnectionsPage(): JSX.Element {
   const [name, setName] = useState("");
   const [mode, setMode] = useState<AuthMode>("subscription");
   const [backend, setBackend] = useState<ConnectionBackend>("claude-code");
+  const [source, setSource] = useState<"local" | "octopus">("local");
+  const [cloud, setCloud] = useState<CloudConnection>(emptyCloud);
   const [model, setModel] = useState("");
   const [endpoint, setEndpoint] = useState("");
   const [credentialRef, setCredentialRef] = useState("");
@@ -50,6 +64,8 @@ export function ConnectionsPage(): JSX.Element {
     setEditing(connection.connectionId);
     setName(connection.displayName);
     setBackend(connection.backend);
+    setSource(connection.source ?? "local");
+    setCloud(connection.cloud ?? emptyCloud());
     setMode(connection.authMode);
     setModel(connection.modelId ?? "");
     setEndpoint(connection.endpoint ?? "");
@@ -69,6 +85,8 @@ export function ConnectionsPage(): JSX.Element {
     setMode("subscription");
     setModel("");
     setBackend("claude-code");
+    setSource("local");
+    setCloud(emptyCloud());
     setEndpoint("");
     setCredentialRef("");
     setStoredRef(undefined);
@@ -83,11 +101,13 @@ export function ConnectionsPage(): JSX.Element {
       displayName: name.trim(),
       authMode: mode,
       backend,
+      source,
+      ...(source === "octopus" ? { cloud } : {}),
       ...(model.trim() === "" ? {} : { modelId: model.trim() }),
-      ...(mode === "api-key" && endpoint.trim() !== "" ? { endpoint: endpoint.trim() } : {}),
+      ...(source === "local" && mode === "api-key" && endpoint.trim() !== "" ? { endpoint: endpoint.trim() } : {}),
       // Derived unless the person named an existing secret: they have a key,
       // and the filing is the system's job.
-      ...(mode !== "api-key"
+      ...(source === "octopus" || mode !== "api-key"
         ? {}
         : {
             credentialRef:
@@ -102,7 +122,7 @@ export function ConnectionsPage(): JSX.Element {
     const saved = await action.run(() =>
       call("connections.save", {
         connection,
-        ...(mode === "api-key" && !existing && key !== "" ? { credential: key } : {}),
+        ...(source === "local" && mode === "api-key" && !existing && key !== "" ? { credential: key } : {}),
       }),
     );
     if (saved === undefined) return;
@@ -111,7 +131,17 @@ export function ConnectionsPage(): JSX.Element {
   };
 
   const remove = async (connection: ConnectionViewWire): Promise<void> => {
-    if (!window.confirm(t("删除连接「{name}」？存在这里的密钥也一起删掉。", { name: connection.displayName }))) return;
+    if (
+      !window.confirm(
+        t(
+          connection.source === "octopus"
+            ? "删除云端连接「{name}」？服务器上的模型配置保留。"
+            : "删除连接「{name}」？存在这里的密钥也一起删掉。",
+          { name: connection.displayName },
+        ),
+      )
+    )
+      return;
     const done = await action.run(() => call("connections.remove", { connectionId: connection.connectionId }));
     if (done !== undefined) {
       libraryChanged();
@@ -126,7 +156,7 @@ export function ConnectionsPage(): JSX.Element {
         <h2>{t("连接")}</h2>
         <p className="muted">
           {t(
-            "一个连接就是一套模型配置：订阅走本机 CLI 的登录态，API key 走你自己的网关。多个 Agent 可以共用同一个连接——换网关只改一处。",
+            "连接可选择本地或云端来源。现有本地登录和 API 配置继续使用；云端模型凭据留在服务器，业务工具在团队项目目录执行。",
           )}
         </p>
         {loadError !== undefined && <div className="error">{loadError}</div>}
@@ -139,11 +169,16 @@ export function ConnectionsPage(): JSX.Element {
             <strong>{connection.displayName}</strong>
             <span className="muted">
               {BACKEND_LABELS[connection.backend] ?? connection.backend} ·{" "}
+              {connection.source === "octopus"
+                ? `${t("云端")} · ${connection.cloud?.host ?? ""} · `
+                : `${t("本地")} · `}
               {connection.authMode === "subscription" ? t("订阅") : "API key"}
               {connection.modelId === undefined ? "" : ` · ${connection.modelId}`}
               {connection.endpoint === undefined ? "" : ` · ${connection.endpoint}`}
             </span>
-            {connection.authMode !== "api-key" ? null : connection.credentialProblem !== undefined ? (
+            {connection.source === "octopus" ? (
+              <span className="badge">{t("模型凭据在云端")}</span>
+            ) : connection.authMode !== "api-key" ? null : connection.credentialProblem !== undefined ? (
               <span className="badge bad" title={connection.credentialProblem}>
                 {t("凭据名不合法，点「编辑」重新填 key")}
               </span>
@@ -172,24 +207,118 @@ export function ConnectionsPage(): JSX.Element {
           <div className="card-title">{editing === undefined ? t("新建连接") : t("编辑「{name}」", { name })}</div>
           <div className="seat-row">
             <input value={name} placeholder={t("连接名")} onChange={(event) => setName(event.target.value)} />
-            <select value={backend} onChange={(event) => setBackend(event.target.value as ConnectionBackend)}>
+            <select
+              aria-label={t("运行来源")}
+              value={source}
+              onChange={(event) => {
+                const next = event.target.value as "local" | "octopus";
+                setSource(next);
+                if (next === "octopus") {
+                  setBackend("codex");
+                  setMode("api-key");
+                }
+              }}
+            >
+              <option value="local">{t("本地")}</option>
+              <option value="octopus">{t("云端（SSH）")}</option>
+            </select>
+            <select
+              value={backend}
+              disabled={source === "octopus"}
+              onChange={(event) => setBackend(event.target.value as ConnectionBackend)}
+            >
               <option value="claude-code">Claude Code</option>
               <option value="codex">{t("Codex（ChatGPT / OpenAI）")}</option>
               <option value="dsh">DeepSeek Harness</option>
             </select>
-            <select value={mode} onChange={(event) => setMode(event.target.value as AuthMode)}>
-              <option value="subscription">{t("订阅（用本机 CLI 的登录态）")}</option>
-              <option value="api-key">API key</option>
-            </select>
+            {source !== "local" ? (
+              <span className="muted">{t("模型认证由云端配置")}</span>
+            ) : (
+              <select value={mode} onChange={(event) => setMode(event.target.value as AuthMode)}>
+                <option value="subscription">{t("订阅（用本机 CLI 的登录态）")}</option>
+                <option value="api-key">API key</option>
+              </select>
+            )}
           </div>
           <div className="seat-row">
             <input
               value={model}
-              placeholder={mode === "subscription" ? t("模型（只能是 {backend} 自家的）", { backend }) : t("模型")}
+              placeholder={
+                source === "octopus"
+                  ? t("模型（留空沿用云端配置）")
+                  : mode === "subscription"
+                    ? t("模型（只能是 {backend} 自家的）", { backend })
+                    : t("模型")
+              }
               onChange={(event) => setModel(event.target.value)}
             />
           </div>
-          {mode !== "api-key" ? null : (
+          {source !== "octopus" ? null : (
+            <>
+              <div className="seat-row">
+                <input
+                  aria-label={t("SSH 主机")}
+                  placeholder={t("SSH 主机")}
+                  value={cloud.host}
+                  onChange={(e) => setCloud({ ...cloud, host: e.target.value.trim() })}
+                />
+                <input
+                  aria-label={t("SSH 端口")}
+                  type="number"
+                  value={cloud.port}
+                  onChange={(e) => setCloud({ ...cloud, port: Number(e.target.value) })}
+                />
+                <input
+                  aria-label={t("SSH 用户")}
+                  placeholder={t("SSH 用户")}
+                  value={cloud.user}
+                  onChange={(e) => setCloud({ ...cloud, user: e.target.value.trim() })}
+                />
+              </div>
+              <div className="seat-row">
+                <input
+                  aria-label={t("本机 SSH 私钥路径")}
+                  placeholder={t("本机 SSH 私钥路径")}
+                  value={cloud.identityFile}
+                  onChange={(e) => setCloud({ ...cloud, identityFile: e.target.value })}
+                />
+              </div>
+              <div className="seat-row">
+                <input
+                  aria-label={t("本机 known_hosts 路径")}
+                  placeholder={t("本机 known_hosts 路径")}
+                  value={cloud.knownHostsFile}
+                  onChange={(e) => setCloud({ ...cloud, knownHostsFile: e.target.value })}
+                />
+              </div>
+              <div className="seat-row">
+                <input
+                  aria-label={t("云端运行程序")}
+                  placeholder={t("云端运行程序")}
+                  value={cloud.executable}
+                  onChange={(e) => setCloud({ ...cloud, executable: e.target.value.trim() })}
+                />
+                <input
+                  aria-label={t("云端运行用户")}
+                  placeholder={t("云端运行用户")}
+                  value={cloud.runAs}
+                  onChange={(e) => setCloud({ ...cloud, runAs: e.target.value.trim() })}
+                />
+                <input
+                  aria-label={t("远端配置版本")}
+                  placeholder={t("远端配置版本")}
+                  value={cloud.revision}
+                  onChange={(e) => setCloud({ ...cloud, revision: e.target.value.trim() })}
+                />
+              </div>
+              <p className="muted">
+                {t(
+                  "沿用席位权限和团队目录。更换云端账户后请递增远端配置版本；云端故障会明确报错，不自动改用本地模型。",
+                )}
+              </p>
+            </>
+          )}
+          {source !== "local" || mode !== "api-key" ? null : (
             <>
               <div className="seat-row">
                 <input
@@ -229,7 +358,10 @@ export function ConnectionsPage(): JSX.Element {
           {/* Said before the save: the host refuses a foreign model on a
               subscription, and that reason is actionable only while the field
               is still in front of the person. */}
-          {mode !== "subscription" || model.trim() === "" || isOwnModel(backend, model.trim()) ? null : (
+          {source !== "local" ||
+          mode !== "subscription" ||
+          model.trim() === "" ||
+          isOwnModel(backend, model.trim()) ? null : (
             <p className="notice inline">
               {t(
                 "「{model}」不是 {backend} 自家的模型。订阅模式用的是本机 CLI 的登录态，这个名字会被发到那个端点，报出来的错会指向模型而不是这个不匹配。要用它就选 API key，填它自己的地址和密钥。",

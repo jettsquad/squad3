@@ -7,6 +7,7 @@ import { createClaudeCodeAdapter } from "./claude-code/adapter.ts";
 import { createCodexAdapter } from "./codex/adapter.ts";
 import { createDshAdapter } from "./dsh/adapter.ts";
 import type { SeatAdapter } from "./types.ts";
+import { createCloudAdapter } from "./cloud/adapter.ts";
 
 export type { ResolvedConnection, SeatAdapter, SeatCapabilities, SeatRequest } from "./types.ts";
 
@@ -42,6 +43,16 @@ export function createSeats(options: SeatsOptions): Seats {
     ["codex", createCodexAdapter(resolve)],
     ["dsh", createDshAdapter({ resolve, stateDir: options.stateDir, configuredCommand: options.dshCommand })],
   ]);
+  const cloud = createCloudAdapter({ stateDir: options.stateDir, resolve });
+  const localCodex = adapters.get("codex");
+  if (localCodex !== undefined)
+    adapters.set("codex", {
+      ...localCodex,
+      // Same capabilities as local Codex: all existing callers, including secretary and Lil X,
+      // select the source on the live resolved connection at start, without duplicating routing.
+      start: (request) =>
+        request.connection?.connection.source === "octopus" ? cloud.start(request) : localCodex.start(request),
+    });
   return {
     adapterFor: (backend) =>
       adapters.get(backend) ??

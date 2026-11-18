@@ -6,6 +6,30 @@
  * Chinese — see `t` in locale.ts.
  */
 export const EN: Readonly<Record<string, string>> = {
+  从本地安装更新: "Install update from local file",
+  "可在线检查，也可选择本机已有的更新包；本地包校验后直接用于安装，不上传或从互联网重下。":
+    "Check online or choose an update package already on this computer. Local packages are verified and reused without uploading or downloading the installer over the Internet.",
+  "连接可选择本地或云端来源。现有本地登录和 API 配置继续使用；云端模型凭据留在服务器，业务工具在团队项目目录执行。":
+    "Choose a local or cloud source. Existing local logins and API connections remain available; cloud model credentials stay on the server and tools run in the team's local project.",
+  云端: "Cloud",
+  本地: "Local",
+  运行来源: "Run source",
+  "云端（SSH）": "Cloud (SSH)",
+  模型凭据在云端: "Model credentials on server",
+  模型认证由云端配置: "Model authentication managed on server",
+  "模型（留空沿用云端配置）": "Model (blank uses server configuration)",
+  "SSH 主机": "SSH host",
+  "SSH 端口": "SSH port",
+  "SSH 用户": "SSH user",
+  "本机 SSH 私钥路径": "Local SSH private key path",
+  "本机 known_hosts 路径": "Local known_hosts path",
+  云端运行程序: "Remote executable",
+  云端运行用户: "Remote runtime user",
+  远端配置版本: "Remote profile revision",
+  "沿用席位权限和团队目录。更换云端账户后请递增远端配置版本；云端故障会明确报错，不自动改用本地模型。":
+    "Uses the seat permissions and team directory. Increment the profile revision after changing the remote account. Cloud failures are reported without falling back to a local model.",
+  "删除云端连接「{name}」？服务器上的模型配置保留。":
+    "Delete cloud connection “{name}”? The server model configuration will be retained.",
   软件更新: "Software updates",
   "点击按钮检查新版本。": "Click the button to check for a new version.",
   "正在检查更新…": "Checking for updates…",
