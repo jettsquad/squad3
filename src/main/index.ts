@@ -5,6 +5,7 @@
  * builds, so it can be tested without a window.
  */
 import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import {
   app,
@@ -22,6 +23,9 @@ import {
   systemPreferences,
   Tray,
 } from "electron";
+import type { AppUpdater } from "electron-updater";
+// electron-updater is CommonJS and exposes `autoUpdater` through a getter,
+// which Node does not recognize as a statically named ESM export.
 import { TRAY_ICON_PNG_BASE64 } from "./tray-icon.ts";
 import { EVENT_CHANNEL, INVOKE_CHANNEL } from "../shared/wire.ts";
 import { compose } from "./compose.ts";
@@ -29,6 +33,30 @@ import { createDispatcher } from "./ipc/index.ts";
 
 // The main bundle is an ES module, which has no `__dirname`.
 const here = dirname(fileURLToPath(import.meta.url));
+let updater: AppUpdater | undefined;
+
+function pushUpdate(data: {
+  readonly state: "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error";
+  readonly version?: string;
+  readonly percent?: number;
+  readonly message?: string;
+}): void {
+  if (window !== undefined && !window.isDestroyed()) window.webContents.send(EVENT_CHANNEL, "app.update", data);
+}
+
+function getUpdater(): AppUpdater {
+  if (updater !== undefined) return updater;
+  updater = (createRequire(import.meta.url)("electron-updater") as { autoUpdater: AppUpdater }).autoUpdater;
+  updater.autoDownload = true;
+  updater.autoInstallOnAppQuit = false;
+  updater.on("checking-for-update", () => pushUpdate({ state: "checking" }));
+  updater.on("update-available", (info) => pushUpdate({ state: "available", version: info.version }));
+  updater.on("update-not-available", (info) => pushUpdate({ state: "not-available", version: info.version }));
+  updater.on("download-progress", (progress) => pushUpdate({ state: "downloading", percent: progress.percent }));
+  updater.on("update-downloaded", (info) => pushUpdate({ state: "downloaded", version: info.version }));
+  updater.on("error", (error) => pushUpdate({ state: "error", message: error.message }));
+  return updater;
+}
 
 /**
  * One instance per machine user, enforced rather than remembered.
@@ -246,6 +274,7 @@ void app.whenReady().then(() => {
         window === undefined ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options);
       return picked.canceled ? [] : picked.filePaths;
     },
+    openPath: (path) => shell.openPath(path),
     // Electron's own notifier: the same on Windows, macOS and Linux (2.x had
     // only osascript and notify-send, so Windows got nothing). Clicking one
     // brings the window up on the team it is about.
@@ -277,6 +306,26 @@ void app.whenReady().then(() => {
     },
     push: (event, data) => {
       if (window !== undefined && !window.isDestroyed()) window.webContents.send(EVENT_CHANNEL, event, data);
+    },
+    checkForUpdates: async () => {
+      if (!app.isPackaged || process.platform !== "win32") {
+        window?.webContents.send(EVENT_CHANNEL, "app.update", {
+          state: "unsupported",
+          message: !app.isPackaged ? "开发版不能自助更新，请使用已安装的版本。" : "当前版本暂不支持应用内更新。",
+        });
+        return;
+      }
+      await getUpdater().checkForUpdates();
+    },
+    installUpdate: () => {
+      if (!app.isPackaged || process.platform !== "win32") {
+        window?.webContents.send(EVENT_CHANNEL, "app.update", {
+          state: "unsupported",
+          message: "当前版本暂不支持应用内更新。",
+        });
+        return;
+      }
+      getUpdater().quitAndInstall(false, true);
     },
     // The title bar, menus and the page's `prefers-color-scheme` all follow
     // this, so a dark page never sits under a white frame.

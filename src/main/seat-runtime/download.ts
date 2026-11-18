@@ -15,7 +15,8 @@
 import { lookup } from "node:dns";
 import { createWriteStream } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
-import { request } from "node:https";
+import { request as httpsRequest } from "node:https";
+import { request as httpRequest } from "node:http";
 import { isIP } from "node:net";
 import { basename, extname, join } from "node:path";
 
@@ -69,15 +70,17 @@ export function downloadFileName(requested: string | undefined, url: URL, now = 
   return `${now.toString(36)}-${stem === "" ? "download" : stem}${ext}`;
 }
 
-export function parseDownloadUrl(text: string): URL {
+export function parseDownloadUrl(text: string, allowHttp = false): URL {
   let url: URL;
   try {
     url = new URL(text);
   } catch {
     throw new Error(`不是有效的 URL：${text}`);
   }
-  if (url.protocol !== "https:") throw new Error("只允许 https:// 的地址。");
+  if (url.protocol !== "https:" && !(allowHttp && url.protocol === "http:")) throw new Error("不支持这个地址协议。");
   if (url.username !== "" || url.password !== "") throw new Error("地址里不能带用户名或密码。");
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  if (isIP(host) !== 0 && isPrivateAddress(host)) throw new Error("不允许访问内网地址。");
   return url;
 }
 
@@ -104,17 +107,22 @@ export interface Downloaded {
 }
 
 /** Fetch `urlText` into `dir`. Throws a message a model can act on. */
-export async function downloadFile(dir: string, urlText: string, requestedName?: string): Promise<Downloaded> {
+export async function downloadFile(
+  dir: string,
+  urlText: string,
+  requestedName?: string,
+  options: { allowHttp?: boolean; maxBytes?: number } = {},
+): Promise<Downloaded> {
   await mkdir(dir, { recursive: true });
   // Written every time: the folder holds whatever was on the web, and nothing
   // in it belongs in the person's repository.
   await writeFile(join(dir, ".gitignore"), "# 席位下载的文件。整个目录对 git 不可见。\n*\n");
 
-  let url = parseDownloadUrl(urlText);
+  let url = parseDownloadUrl(urlText, options.allowHttp);
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-    const outcome = await fetchOnce(url, dir, requestedName);
+    const outcome = await fetchOnce(url, dir, requestedName, options.maxBytes ?? MAX_DOWNLOAD_BYTES);
     if (outcome.kind === "saved") return outcome.file;
-    url = parseDownloadUrl(new URL(outcome.location, url).toString());
+    url = parseDownloadUrl(new URL(outcome.location, url).toString(), options.allowHttp);
   }
   throw new Error(`重定向超过 ${MAX_REDIRECTS} 次。`);
 }
@@ -122,9 +130,9 @@ export async function downloadFile(dir: string, urlText: string, requestedName?:
 type Outcome =
   { readonly kind: "saved"; readonly file: Downloaded } | { readonly kind: "redirect"; readonly location: string };
 
-function fetchOnce(url: URL, dir: string, requestedName: string | undefined): Promise<Outcome> {
+function fetchOnce(url: URL, dir: string, requestedName: string | undefined, maxBytes: number): Promise<Outcome> {
   return new Promise((resolve, reject) => {
-    const req = request(
+    const req = (url.protocol === "https:" ? httpsRequest : httpRequest)(
       url,
       {
         method: "GET",
@@ -145,9 +153,9 @@ function fetchOnce(url: URL, dir: string, requestedName: string | undefined): Pr
           return;
         }
         const declared = Number(res.headers["content-length"] ?? 0);
-        if (declared > MAX_DOWNLOAD_BYTES) {
+        if (declared > maxBytes) {
           res.resume();
-          reject(new Error(`文件太大（${declared} 字节，上限 ${MAX_DOWNLOAD_BYTES}）。`));
+          reject(new Error(`文件太大（${declared} 字节，上限 ${maxBytes}）。`));
           return;
         }
         const target = join(dir, downloadFileName(requestedName, url));
@@ -161,9 +169,9 @@ function fetchOnce(url: URL, dir: string, requestedName: string | undefined): Pr
         };
         res.on("data", (chunk: Buffer) => {
           bytes += chunk.length;
-          if (bytes > MAX_DOWNLOAD_BYTES) {
+          if (bytes > maxBytes) {
             res.destroy();
-            fail(new Error(`文件超过上限 ${MAX_DOWNLOAD_BYTES} 字节，已中止。`));
+            fail(new Error(`文件超过上限 ${maxBytes} 字节，已中止。`));
           }
         });
         res.on("error", fail);

@@ -474,6 +474,11 @@ textarea {
   flex-wrap: wrap;
 }
 
+.mention-menu button.active {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+
 .seat-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);

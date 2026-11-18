@@ -121,6 +121,10 @@ export function createClaudeCodeAdapter(resolve: (name: string) => ResolvedComma
             // Endpoint, key and model, per the one injection rule
             // (`envForConnection`): nothing at all for a subscription seat.
             ...(request.connection?.env ?? {}),
+            // Raise Claude Code's per-request output ceiling for long-running
+            // seat work. This includes thinking tokens and may still be
+            // clamped by the selected model or its API provider.
+            CLAUDE_CODE_MAX_OUTPUT_TOKENS: "256000",
             ...(configDir === undefined ? {} : { CLAUDE_CONFIG_DIR: configDir }),
           },
           parse: (stdout) => readStream(stdout),

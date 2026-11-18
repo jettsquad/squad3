@@ -10,8 +10,8 @@
  * layer reads the table through a late-bound function. The arrow that matters
  * still runs one way: only the table starts seats.
  */
-import { readFile, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { basename, isAbsolute, join, relative } from "node:path";
 import { captureWindow } from "../shared/capture-window.ts";
 import {
   connectionMismatch,
@@ -30,6 +30,7 @@ import { createDesigner } from "./designer/index.ts";
 import { createMigrator, type MigrationReport } from "./migrate/index.ts";
 import {
   materialFromFile,
+  cacheRemoteImage,
   MAX_FILE_BYTES,
   readMedia,
   speak,
@@ -109,7 +110,17 @@ export interface AppEnvironment {
   readonly pickFolder: () => Promise<string | null>;
   /** The system file dialog, several at once. Empty when the person cancels. */
   readonly pickFiles: () => Promise<readonly string[]>;
-  readonly push: (event: "team.changed" | "team.open", data: { readonly teamId: string }) => void;
+  /** Open a validated project file with the operating system's default app. */
+  readonly openPath?: ((path: string) => Promise<string>) | undefined;
+  readonly push: (
+    event: "team.changed" | "team.open" | "app.update",
+    data:
+      | { readonly teamId: string }
+      | { readonly state: string; readonly version?: string; readonly percent?: number; readonly message?: string },
+  ) => void;
+  /** App updater actions, supplied by Electron only in the desktop build. */
+  readonly checkForUpdates?: (() => Promise<void>) | undefined;
+  readonly installUpdate?: (() => void) | undefined;
   /**
    * Raise a system notification; clicking it brings this team up. Absent in
    * tests and wherever there is no desktop to raise one on.
@@ -373,6 +384,16 @@ export function compose(env: AppEnvironment): Composed {
       platform: process.platform,
       dataDir: env.dataDir,
     }),
+    "app.update.check": async () => {
+      if (env.checkForUpdates === undefined) throw new Error("当前环境不支持软件更新。");
+      await env.checkForUpdates();
+      return {};
+    },
+    "app.update.install": async () => {
+      if (env.installUpdate === undefined) throw new Error("当前环境不支持软件更新。");
+      env.installUpdate();
+      return {};
+    },
     "app.startup": async () => {
       const listed = built.list();
       return {
@@ -830,6 +851,40 @@ export function compose(env: AppEnvironment): Composed {
     },
     "teams.setPrompts": async ({ teamId, prompts }) => {
       built.setPrompts(teamId, prompts);
+      return {};
+    },
+    "images.cacheRemote": async ({ projectFolder, url }) => {
+      if (!built.list().teams.some((team) => team.projectFolder === projectFolder))
+        throw new Error("只能使用团队的项目文件夹。");
+      return { path: await cacheRemoteImage(projectFolder, url) };
+    },
+    "files.open": async ({ projectFolder, path }) => {
+      if (env.openPath === undefined) throw new Error("当前环境不能打开本地文件。");
+      let candidate = path;
+      try {
+        candidate = decodeURIComponent(candidate);
+      } catch {
+        // Keep the original path; realpath below will reject invalid names.
+      }
+      // Markdown treats a Windows drive path as a URL path and prepends `/`.
+      if (/^\/[A-Za-z]:[\\/]/.test(candidate)) candidate = candidate.slice(1);
+      if (!isAbsolute(candidate)) throw new Error("文件链接不是绝对路径。");
+      const root = await realpath(projectFolder).catch(() => {
+        throw new Error("团队项目文件夹不存在。");
+      });
+      const ownsFolder = built.list().teams.some((team) => team.projectFolder === projectFolder);
+      if (!ownsFolder) throw new Error("只能打开团队项目文件夹中的文件。");
+      const target = await realpath(candidate).catch(() => {
+        throw new Error("找不到这个文件。");
+      });
+      const inside = relative(root, target);
+      if (inside === "" || inside.startsWith("..") || isAbsolute(inside)) {
+        throw new Error("只能打开团队项目文件夹中的文件。");
+      }
+      const details = await stat(target);
+      if (!details.isFile()) throw new Error("目标不是文件。");
+      const error = await env.openPath(target);
+      if (error !== "") throw new Error(error);
       return {};
     },
     "settings.get": async () => library.settings.get(),

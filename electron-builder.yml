@@ -14,6 +14,12 @@ directories:
   output: release
   buildResources: build
 
+publish:
+  provider: github
+  owner: jettsquad
+  repo: squad3
+  releaseType: release
+
 # The built app only: sources, tests and docs stay out. Production
 # dependencies (the document readers the main process loads) are added by
 # electron-builder from package.json on its own.
@@ -38,7 +44,7 @@ electronDist: node_modules/electron/dist
 
 win:
   target: nsis
-  icon: build/icon.png
+  icon: build/icon.ico
 
 nsis:
   oneClick: false
@@ -53,6 +59,7 @@ nsis:
 
 mac:
   target: dmg
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
   icon: build/icon.png
   category: public.app-category.productivity
   extendInfo:

@@ -15,7 +15,7 @@ import tseslint from "typescript-eslint";
 const MODULES = ["table", "context", "secretary", "reasoning", "designer", "migrate", "library", "store", "vault", "seats", "extras", "ipc", "agent-check"];
 
 export default tseslint.config(
-  { ignores: ["**/node_modules/**", "out/**", "dist/**", "release/**"] },
+  { ignores: ["**/node_modules/**", ".electron-builder-cache/**", "out/**", "dist/**", "release/**"] },
   js.configs.recommended,
   { languageOptions: { globals: globals.node } },
   ...tseslint.configs.recommended,

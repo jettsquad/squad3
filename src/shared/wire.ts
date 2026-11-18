@@ -392,6 +392,10 @@ export const methods = {
     input: z.object({}).strict(),
     output: z.object({ name: z.string(), version: z.string(), platform: z.string(), dataDir: z.string() }),
   },
+  /** Check the configured release feed for a newer installed app version. */
+  "app.update.check": { input: z.object({}).strict(), output: z.object({}) },
+  /** Install an already downloaded update and restart. */
+  "app.update.install": { input: z.object({}).strict(), output: z.object({}) },
   /**
    * What starting up found: each backend's CLI (found where a seat would look,
    * or why not), the single-instance lock, and how the teams came back.
@@ -439,6 +443,15 @@ export const methods = {
   "sessions.open": {
     input: z.object({ teamId: z.string(), name: z.string().optional() }).strict(),
     output: z.object({ teamId: z.string() }),
+  },
+  /** Open a file link from a team reply, restricted to that team's project folder. */
+  "files.open": {
+    input: z.object({ projectFolder: z.string().min(1), path: z.string().min(1) }).strict(),
+    output: z.object({}),
+  },
+  "images.cacheRemote": {
+    input: z.object({ projectFolder: z.string().min(1), url: z.string().url().max(8192) }).strict(),
+    output: z.object({ path: z.string() }),
   },
   /** Blank goes back to 「第 N 场 · 时间」. */
   "sessions.rename": {
@@ -865,6 +878,13 @@ export interface PushEvents {
   readonly "team.changed": { readonly teamId: string };
   /** Bring this team up: the person clicked its notification. */
   readonly "team.open": { readonly teamId: string };
+  /** Progress of the desktop app's release update. */
+  readonly "app.update": {
+    readonly state: "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error" | "unsupported";
+    readonly version?: string;
+    readonly percent?: number;
+    readonly message?: string;
+  };
 }
 
 /**

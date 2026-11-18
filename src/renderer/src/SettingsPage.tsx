@@ -18,6 +18,14 @@ import { systemLanguage, t } from "./locale.ts";
 import { openPage } from "./Voice.tsx";
 import type { ConnectionViewWire } from "../../shared/wire.ts";
 
+interface UpdateStatus {
+  readonly state:
+    "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error" | "unsupported";
+  readonly version?: string;
+  readonly percent?: number;
+  readonly message?: string;
+}
+
 export function SettingsPage(): JSX.Element {
   const { library, error: loadError } = useLibrary();
   const saved = library?.settings;
@@ -27,6 +35,7 @@ export function SettingsPage(): JSX.Element {
   const [folder, setFolder] = useState("");
   const [model, setModel] = useState("");
   const [info, setInfo] = useState<{ version: string; dataDir: string } | undefined>(undefined);
+  const [update, setUpdate] = useState<UpdateStatus>({ state: "idle" });
   const action = useAction();
 
   // Re-seeded when the stored value changes, so a stale box never overwrites a newer value.
@@ -49,7 +58,38 @@ export function SettingsPage(): JSX.Element {
   }, [saved?.fontScale]);
   useEffect(() => {
     void call("app.info", {}).then(setInfo, () => undefined);
+    if ((window as Partial<Window>).squad === undefined) return undefined;
+    return window.squad.on((event, data) => {
+      if (event === "app.update") setUpdate(data as UpdateStatus);
+    });
   }, []);
+
+  const checkForUpdates = (): void => {
+    setUpdate({ state: "checking" });
+    void call("app.update.check", {}).catch((error: unknown) =>
+      setUpdate({ state: "error", message: error instanceof Error ? error.message : String(error) }),
+    );
+  };
+
+  const updateMessage = (): string => {
+    switch (update.state) {
+      case "idle":
+        return t("点击按钮检查新版本。");
+      case "checking":
+        return t("正在检查更新…");
+      case "available":
+        return t("发现新版本 {version}，准备下载…", { version: update.version ?? "" });
+      case "not-available":
+        return t("当前已是最新版本（{version}）。", { version: update.version ?? "" });
+      case "downloading":
+        return t("正在下载更新：{percent}%", { percent: Math.floor(update.percent ?? 0) });
+      case "downloaded":
+        return t("新版本 {version} 已下载完成。", { version: update.version ?? "" });
+      case "unsupported":
+      case "error":
+        return update.message ?? t("检查更新失败。");
+    }
+  };
 
   // Speech and dictation call a provider's API with the connection's own key;
   // a connection without one is listed, but says so (imports from 2.x carry no keys).
@@ -305,6 +345,36 @@ export function SettingsPage(): JSX.Element {
 
         {info !== undefined && (
           <>
+            <div className="section-title">{t("软件更新")}</div>
+            <div className="row-gap">
+              {update.state === "downloaded" ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void call("app.update.install", {}).catch((error: unknown) =>
+                      setUpdate({ state: "error", message: error instanceof Error ? error.message : String(error) }),
+                    )
+                  }
+                >
+                  {t("重启并安装更新")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={
+                    update.state === "checking" || update.state === "available" || update.state === "downloading"
+                  }
+                  onClick={checkForUpdates}
+                >
+                  {update.state === "checking" || update.state === "available" || update.state === "downloading"
+                    ? t("检查更新中…")
+                    : t("检查更新")}
+                </button>
+              )}
+              <span className="muted">{updateMessage()}</span>
+            </div>
+            <p className="muted">{t("发现新版本后会自动下载；下载完成后点击重启并安装。")}</p>
+
             <div className="section-title">{t("从 Squad 2.x 导入")}</div>
             <ImportPanel />
 

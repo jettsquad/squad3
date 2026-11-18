@@ -80,7 +80,23 @@ export function createCodexAdapter(resolve: (name: string) => ResolvedCommand): 
         stdin: request.prompt,
         cwd: request.cwd,
         // `CODEX_API_KEY` for an api-key connection, nothing for a subscription.
-        env: { ...process.env, ...(request.connection?.env ?? {}) },
+        // Electron/desktop launchers can omit HOME on Windows. Codex uses
+        // HOME (and CODEX_HOME when set) to find its auth and MCP config; a
+        // missing home makes the CLI fail before it can use the desktop's
+        // browser bridge. Keep any explicit host value, and only supply the
+        // conventional Windows profile defaults when absent.
+        env: {
+          ...process.env,
+          ...(process.platform === "win32"
+            ? {
+                HOME: process.env["HOME"] ?? process.env["USERPROFILE"],
+                CODEX_HOME:
+                  process.env["CODEX_HOME"] ??
+                  (process.env["USERPROFILE"] === undefined ? undefined : `${process.env["USERPROFILE"]}\\.codex`),
+              }
+            : {}),
+          ...(request.connection?.env ?? {}),
+        },
         parse: (stdout) => readCodexStream(stdout),
         tracker: codexTracker,
         limits: SEAT_SILENCE_LIMITS,

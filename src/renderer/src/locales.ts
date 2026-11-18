@@ -6,6 +6,19 @@
  * Chinese — see `t` in locale.ts.
  */
 export const EN: Readonly<Record<string, string>> = {
+  软件更新: "Software updates",
+  "点击按钮检查新版本。": "Click the button to check for a new version.",
+  "正在检查更新…": "Checking for updates…",
+  "发现新版本 {version}，准备下载…": "Version {version} is available. Preparing to download…",
+  "当前已是最新版本（{version}）。": "You are up to date ({version}).",
+  "正在下载更新：{percent}%": "Downloading update: {percent}%",
+  "新版本 {version} 已下载完成。": "Version {version} has been downloaded.",
+  "检查更新失败。": "Could not check for updates.",
+  重启并安装更新: "Restart and install update",
+  "检查更新中…": "Checking for updates…",
+  检查更新: "Check for updates",
+  "发现新版本后会自动下载；下载完成后点击重启并安装。":
+    "Updates download automatically. When the download finishes, click Restart and install.",
   "## 你的职责": "## Your job",
   "%（5–90）": "% (5–90)",
   "（当前）": " (current)",
@@ -651,7 +664,6 @@ export const EN: Readonly<Record<string, string>> = {
     "Not while the window is in front — you do not need telling about what you are looking at. Clicking a notification takes you to that team.",
   后端工具: "Backend tools",
   "检查中…": "Checking…",
-  检查更新: "Check for updates",
   运行不起来: "does not run",
   "{installed} · 有新版 {latest}": "{installed} · {latest} available",
   "{installed} · 已是最新": "{installed} · up to date",

@@ -10,6 +10,7 @@ import { imagePointer, looksLikeImage, saveImage } from "./image.ts";
 
 export { extractDocument, MAX_FILE_BYTES } from "./extract.ts";
 export { imagePointer, looksLikeImage, readMedia, saveImage } from "./image.ts";
+export { cacheRemoteImage } from "./remote-image.ts";
 export { bannerFor, previewOf, quietBanner, type Banner } from "./notify.ts";
 export { BACKEND_TOOLS, createBackendTools, type BackendTool } from "./backend-tools.ts";
 export { speak, speechEndpointFor, transcribe, transcriptionEndpointFor, type VoiceConnection } from "./voice.ts";

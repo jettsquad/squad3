@@ -15,8 +15,9 @@
  * not markup to run.
  */
 import "katex/dist/katex.min.css";
-import { memo, useState, type JSX, type ReactNode } from "react";
+import { memo, useEffect, useState, type JSX, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
+import { call } from "./api.ts";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
@@ -76,20 +77,101 @@ export function LocalImage({ path, alt }: { readonly path: string; readonly alt:
   );
 }
 
+function RemoteImage({
+  url,
+  alt,
+  projectFolder,
+}: {
+  readonly url: string;
+  readonly alt: string;
+  readonly projectFolder: string | undefined;
+}): JSX.Element {
+  const [path, setPath] = useState<string>();
+  const [error, setError] = useState<string>();
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setPath(undefined);
+    setError(undefined);
+    if (projectFolder !== undefined) {
+      void call("images.cacheRemote", { projectFolder, url }).then(
+        (result) => {
+          if (!cancelled) setPath(result.path);
+        },
+        (reason: unknown) => {
+          if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+        },
+      );
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [projectFolder, url, attempt]);
+  return (
+    <span style={{ display: "block", margin: "0.5em 0" }}>
+      {path !== undefined && (
+        <img
+          src={mediaUrl(path)}
+          alt={alt}
+          style={{ maxWidth: "100%", maxHeight: 480 }}
+          onError={() => setError("缓存图片加载失败。")}
+        />
+      )}
+      {path === undefined && error === undefined && projectFolder !== undefined && (
+        <span className="muted">图片加载中… </span>
+      )}
+      {error !== undefined && (
+        <span className="muted">
+          图片加载失败：{error}{" "}
+          <button type="button" onClick={() => setAttempt((n) => n + 1)}>
+            重试
+          </button>{" "}
+        </span>
+      )}
+      <a href={url} target="_blank" rel="noreferrer">
+        {alt || "查看图片来源"}
+      </a>
+    </span>
+  );
+}
+
+function isDirectImageUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      (parsed.protocol === "https:" || parsed.protocol === "http:") &&
+      /\.(png|jpe?g|gif|webp|bmp)$/i.test(parsed.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
 const REHYPE_PLUGINS: NonNullable<Parameters<typeof ReactMarkdown>[0]["rehypePlugins"]> = [
   [rehypeHighlight, { detect: false }],
   rehypeKatex,
 ];
+function diskPathFromHref(href: string): string | undefined {
+  let path = href;
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    return undefined;
+  }
+  if (path.startsWith("file://")) {
+    try {
+      path = new URL(path).pathname;
+    } catch {
+      return undefined;
+    }
+  }
+  if (/^\/[A-Za-z]:[\\/]/.test(path)) path = path.slice(1);
+  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\") || path.startsWith("/") ? path : undefined;
+}
+
 const COMPONENTS: NonNullable<Parameters<typeof ReactMarkdown>[0]["components"]> = {
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-  // Opened by the system browser (the main process routes it there);
-  // the window itself never navigates away from the team.
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noreferrer">
-      {children}
-    </a>
-  ),
   // A remote picture is not loaded: the window's policy allows only
   // pictures from a team's own folder. Said, not left as a blank box.
   img: ({ src, alt }) => (
@@ -114,13 +196,47 @@ export const Markdown = memo(function Markdown({
   readonly text: string;
   readonly projectFolder?: string;
 }): JSX.Element {
+  const [openError, setOpenError] = useState<string | undefined>(undefined);
   const { text: body, images } = extractLocalImages(text);
   const mentioned = projectFolder === undefined ? [] : imagePathsIn(body, projectFolder);
+  const components: NonNullable<Parameters<typeof ReactMarkdown>[0]["components"]> = {
+    ...COMPONENTS,
+    img: ({ src, alt }) =>
+      typeof src === "string" && /^https?:\/\//i.test(src) ? (
+        <RemoteImage url={src} alt={alt ?? ""} projectFolder={projectFolder} />
+      ) : (
+        <span className="muted">{alt ?? "图片"}</span>
+      ),
+    a: ({ href, children }) => {
+      if (href !== undefined && isDirectImageUrl(href) && textOf(children) === href) {
+        return <RemoteImage url={href} alt="" projectFolder={projectFolder} />;
+      }
+      const path = href === undefined ? undefined : diskPathFromHref(href);
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(event) => {
+            if (path === undefined || projectFolder === undefined) return;
+            event.preventDefault();
+            void call("files.open", { projectFolder, path }).then(
+              () => setOpenError(undefined),
+              (error: unknown) => setOpenError(error instanceof Error ? error.message : String(error)),
+            );
+          }}
+        >
+          {children}
+        </a>
+      );
+    },
+  };
   return (
     <div className="markdown">
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={COMPONENTS}>
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={components}>
         {body}
       </ReactMarkdown>
+      {openError !== undefined && <div className="error">{openError}</div>}
       {[...images, ...mentioned.map((path) => ({ alt: "", path }))].map((image) => (
         <LocalImage key={image.path} path={image.path} alt={image.alt} />
       ))}

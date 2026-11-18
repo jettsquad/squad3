@@ -366,6 +366,7 @@ export function TeamView(props: {
   const [attached, setAttached] = useState<readonly string[]>([]);
   const [draft, setDraft] = useState("");
   const [mention, setMention] = useState<MentionDraft | undefined>(undefined);
+  const [mentionIndex, setMentionIndex] = useState(0);
   const load = useAction();
   const send = useAction();
   const control = useAction();
@@ -373,6 +374,7 @@ export function TeamView(props: {
   const box = useRef<HTMLTextAreaElement>(null);
   const names = team.seats.map((seat) => seat.displayName);
   const candidates = mention === undefined ? [] : mentionCandidates(mention, names);
+  const activeMentionIndex = candidates.length === 0 ? 0 : mentionIndex % candidates.length;
 
   useEffect(() => {
     void load.run(async () => {
@@ -531,6 +533,7 @@ export function TeamView(props: {
     const next = applyMention(draft, element.selectionStart, mention, name);
     setDraft(next.text);
     setMention(undefined);
+    setMentionIndex(0);
     requestAnimationFrame(() => {
       element.focus();
       element.setSelectionRange(next.caret, next.caret);
@@ -713,10 +716,12 @@ export function TeamView(props: {
           )}
           {candidates.length > 0 && (
             <div className="mention-menu">
-              {candidates.map((name) => (
+              {candidates.map((name, index) => (
                 <button
                   type="button"
                   key={name}
+                  className={index === activeMentionIndex ? "active" : undefined}
+                  aria-selected={index === activeMentionIndex}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => pickMention(name)}
                 >
@@ -766,10 +771,28 @@ export function TeamView(props: {
             onChange={(event) => {
               setDraft(event.target.value);
               setMention(mentionDraftAt(event.target.value, event.target.selectionStart));
+              setMentionIndex(0);
             }}
             onKeyDown={(event) => {
+              if (candidates.length > 0 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+                if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+                  event.preventDefault();
+                  const direction = event.key === "ArrowRight" ? 1 : -1;
+                  setMentionIndex((current) => (current + direction + candidates.length) % candidates.length);
+                  return;
+                }
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  const name = candidates[activeMentionIndex];
+                  if (name !== undefined) pickMention(name);
+                  return;
+                }
+              }
               if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) void submit();
-              if (event.key === "Escape") setMention(undefined);
+              if (event.key === "Escape") {
+                setMention(undefined);
+                setMentionIndex(0);
+              }
             }}
           />
           {send.error !== undefined && <div className="error">{send.error}</div>}
