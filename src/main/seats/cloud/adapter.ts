@@ -128,7 +128,10 @@ export function cloudResume(id: string | undefined, scope: string): string | und
 }
 
 /** Strict SSH host verification. The only remote command is a validated executable and user. */
-export function cloudSshArgs(connection: SeatConnection, operation: "agent" | "quota" = "agent"): readonly string[] {
+export function cloudSshArgs(
+  connection: SeatConnection,
+  operation: "agent" | "quota" | "status" | "subscription" | "subscribe-month" | "subscribe-year" = "agent",
+): readonly string[] {
   const problems = checkConnection(connection);
   if (problems.length > 0) throw new Error(problems.map((p) => p.detail).join("\n"));
   const c = connection.cloud;
@@ -145,6 +148,9 @@ export function cloudSshArgs(connection: SeatConnection, operation: "agent" | "q
     "BatchMode=yes",
     "-o",
     "StrictHostKeyChecking=yes",
+    ...(c.managedDeviceId === undefined
+      ? []
+      : ["-F", "none", "-o", "GlobalKnownHostsFile=none", "-o", "HostKeyAlgorithms=ssh-ed25519"]),
     "-o",
     `UserKnownHostsFile=${c.knownHostsFile}`,
     "-o",
@@ -154,9 +160,11 @@ export function cloudSshArgs(connection: SeatConnection, operation: "agent" | "q
     "-o",
     "ServerAliveCountMax=2",
     `${c.user}@${c.host}`,
-    operation === "agent"
-      ? `exec runuser -u ${c.runAs} -- timeout 1800 ${c.executable} app-server --stdio`
-      : `exec runuser -u ${c.runAs} -- timeout 15 ${c.executable} squad-quota`,
+    c.managedDeviceId !== undefined
+      ? `squad-${operation}`
+      : operation === "agent"
+        ? `exec runuser -u ${c.runAs} -- timeout 1800 ${c.executable} app-server --stdio`
+        : `exec runuser -u ${c.runAs} -- timeout 15 ${c.executable} squad-quota`,
   ];
 }
 

@@ -10,7 +10,7 @@ import { BlocksPage } from "./BlocksPage.tsx";
 import { ConnectionsPage } from "./ConnectionsPage.tsx";
 import { CriteriaPage } from "./CriteriaPage.tsx";
 import { CreateTeam } from "./CreateTeam.tsx";
-import { useLibrary } from "./library.ts";
+import { libraryChanged, useLibrary } from "./library.ts";
 import { speech } from "./speech.ts";
 import { Startup } from "./Startup.tsx";
 import { setLanguage, systemLanguage, t } from "./locale.ts";
@@ -43,6 +43,17 @@ export function App(): JSX.Element {
   /** groupId → the session last open in that team, so clicking the team returns to it. */
   const lastSession = useRef(new Map<string, string>());
   const { library } = useLibrary();
+  const [cloudError, setCloudError] = useState<string>();
+  useEffect(() => {
+    void call("connections.activateCloud", {}).then(
+      () => {
+        libraryChanged();
+      },
+      (error: unknown) => {
+        setCloudError(error instanceof Error ? error.message : String(error));
+      },
+    );
+  }, []);
   // Set before the children render, so every t() below reads the right
   // language; the tree is keyed on it, so a switch redraws everything.
   const lang = library?.settings.language ?? systemLanguage();
@@ -287,7 +298,7 @@ export function App(): JSX.Element {
       ) : selection.kind === "blocks" ? (
         <BlocksPage />
       ) : selection.kind === "connections" ? (
-        <ConnectionsPage />
+        <ConnectionsPage initialCloudError={cloudError} />
       ) : selection.kind === "criteria" ? (
         <CriteriaPage />
       ) : selection.kind === "archive" ? (

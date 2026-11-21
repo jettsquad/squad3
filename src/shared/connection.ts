@@ -35,6 +35,7 @@ export interface CloudConnection {
   /** Increment when the server profile's account changes. */
   readonly revision: string;
   readonly quotaProvider?: "chatgpt" | "minimax" | undefined;
+  readonly managedDeviceId?: string | undefined;
 }
 
 export interface SeatConnection {

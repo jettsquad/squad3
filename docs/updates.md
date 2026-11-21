@@ -10,3 +10,5 @@
 哈希校验确认文件与所选发布元数据一致，不代表第三方包可信。应选择本人构建或项目发布的安装包。本地入口不接受降级、同版本重复安装、文件名/版本不匹配或校验失败的包。
 
 发布时上传 exe、exe.blockmap、latest.yml；预发布另附相同元数据的 dev.yml，使用与 package.json 一致的 v 标签。安装器应对应发布标签的源码提交；不要用不同构建覆盖已经发布的同名附件。Windows-only 发布只声明 Windows 已验证，不附带旧版 macOS 包。
+
+跨平台预发布同时提供 Apple 芯片和 Intel Mac 的 DMG，供手动安装。当前 Mac 构建没有 Developer ID 签名配置，发布流程不生成 macOS 自动更新。GitHub Actions 仓库变量 `SQUAD_DEVICE_GATEWAY` 用于在安装包内配置默认云端入口，标签发布前会核对打包结果。

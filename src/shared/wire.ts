@@ -54,6 +54,10 @@ const connection = z
         runAs: z.string(),
         revision: z.string(),
         quotaProvider: z.enum(["chatgpt", "minimax"]).optional(),
+        managedDeviceId: z
+          .string()
+          .regex(/^[a-f0-9]{32}$/)
+          .optional(),
       })
       .strict()
       .optional(),
@@ -655,6 +659,28 @@ export const methods = {
   "connections.save": {
     input: z.object({ connection, credential: z.string().optional() }).strict(),
     output: z.object({ connection }),
+  },
+  "connections.deviceStatus": {
+    input: z.object({ connectionId: z.string() }).strict(),
+    output: z.object({ expiresAt: z.number().nullable(), state: z.enum(["active", "paused", "revoked", "expired"]) }),
+  },
+  "connections.activateCloud": {
+    input: z.object({}).strict(),
+    output: z.object({ connection: connection }),
+  },
+  "connections.subscription": {
+    input: z.object({ connectionId: z.string(), term: z.enum(["month", "year"]).optional() }).strict(),
+    output: z.object({
+      state: z.enum(["active", "paused", "revoked", "expired"]),
+      expiresAt: z.number().nullable(),
+      request: z
+        .object({
+          term: z.enum(["month", "year"]),
+          status: z.enum(["pending", "approved", "rejected"]),
+          requestedAt: z.number(),
+        })
+        .nullable(),
+    }),
   },
   "connections.remove": {
     input: z.object({ connectionId: z.string() }).strict(),

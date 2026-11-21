@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 // Paths resolve against the repository root, where every script runs from.
 export default defineConfig({
   main: {
+    define: { "process.env.SQUAD_DEVICE_GATEWAY": JSON.stringify(process.env.SQUAD_DEVICE_GATEWAY ?? "") },
     plugins: [externalizeDepsPlugin()],
     // The download tool is its own process, started by a seat's CLI: a second
     // entry, so it lands beside the main bundle as out/main/download-mcp.js.

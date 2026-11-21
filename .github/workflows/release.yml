@@ -36,7 +36,20 @@ jobs:
       - name: Check release version
         if: startsWith(github.ref, 'refs/tags/')
         run: node -e "if (process.env.GITHUB_REF_NAME !== 'v' + require('./package.json').version) process.exitCode = 1"
-      - run: npm run ${{ matrix.script }} -- --publish never
+      - name: Verify default cloud endpoint configuration
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          SQUAD_DEVICE_GATEWAY: ${{ vars.SQUAD_DEVICE_GATEWAY }}
+        run: node -e "if (!/^[A-Za-z0-9][A-Za-z0-9.-]*:[0-9]{1,5}:[0-9a-f]{64}$/.test(process.env.SQUAD_DEVICE_GATEWAY || '')) throw Error('Set the SQUAD_DEVICE_GATEWAY repository variable before releasing')"
+      - name: Build installer
+        env:
+          SQUAD_DEVICE_GATEWAY: ${{ vars.SQUAD_DEVICE_GATEWAY }}
+        run: npm run ${{ matrix.script }} -- --publish never
+      - name: Verify default cloud endpoint is bundled
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          SQUAD_DEVICE_GATEWAY: ${{ vars.SQUAD_DEVICE_GATEWAY }}
+        run: node -e "if (!require('fs').readFileSync('out/main/index.js', 'utf8').includes(process.env.SQUAD_DEVICE_GATEWAY)) throw Error('Default cloud endpoint was not bundled')"
       - name: Prepare prerelease update metadata
         if: runner.os == 'Windows' && contains(github.ref_name, '-')
         shell: pwsh
@@ -75,4 +88,8 @@ jobs:
         run: |
           flags=()
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags+=(--prerelease); fi
-          gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes "${flags[@]}"
+          note='Windows x64 支持应用内更新。macOS 请按芯片选择 Apple 芯片（arm64）或 Intel（x64）的 DMG 手动更新。'
+          if [[ "$GITHUB_REF_NAME" == "v3.0.0-dev.8" ]]; then
+            note=$'首次启动自动开通云端 MiniMax 的 10 天试用。可申请 1 个月或 1 年使用授权，由后台审核。\n\n'"$note"
+          fi
+          gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes --notes "$note" "${flags[@]}"

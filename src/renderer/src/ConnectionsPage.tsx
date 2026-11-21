@@ -12,24 +12,12 @@
  * subscription the host REFUSES both — 「订阅模式不使用自定义端点」. Showing a
  * field whose value will be rejected teaches that the form is unreliable.
  */
-import { useState, type JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 import { credentialRefFor, isOwnModel, type AuthMode, type ConnectionBackend } from "../../shared/index.ts";
 import type { ConnectionViewWire, ConnectionWire, MethodOutput } from "../../shared/wire.ts";
 import { call, useAction } from "./api.ts";
 import { BACKEND_LABELS, libraryChanged, useLibrary } from "./library.ts";
 import { t } from "./locale.ts";
-import type { CloudConnection } from "../../shared/connection.ts";
-
-const emptyCloud = (): CloudConnection => ({
-  host: "",
-  port: 22,
-  user: "root",
-  identityFile: "",
-  knownHostsFile: "",
-  executable: "/opt/octopus-g0/bin/codex-minimax",
-  runAs: "octopus-g0",
-  revision: "1",
-});
 
 function Quota({ connectionId }: { connectionId: string }): JSX.Element {
   const action = useAction();
@@ -64,7 +52,110 @@ function Quota({ connectionId }: { connectionId: string }): JSX.Element {
   );
 }
 
-export function ConnectionsPage(): JSX.Element {
+function CloudActivation({ initialError }: { initialError?: string | undefined }): JSX.Element {
+  const action = useAction();
+  return (
+    <div className="card">
+      <strong>{t("云端 Agent")}</strong>
+      <p>{t("云端 MiniMax 首次开通后可试用 10 天。")}</p>
+      <button
+        type="button"
+        disabled={action.busy}
+        onClick={() =>
+          void action.run(async () => {
+            await call("connections.activateCloud", {});
+            libraryChanged();
+          })
+        }
+      >
+        {t("重试开通云端 Agent")}
+      </button>
+      {(action.error ?? initialError) && <p className="error">{action.error ?? initialError}</p>}
+    </div>
+  );
+}
+
+function CloudSubscription({ connectionId }: { connectionId: string }): JSX.Element {
+  const action = useAction();
+  const [term, setTerm] = useState<"month" | "year">("month");
+  const [status, setStatus] = useState<MethodOutput<"connections.subscription">>();
+  const [loadError, setLoadError] = useState<string>();
+  useEffect(() => {
+    let live = true;
+    void call("connections.subscription", { connectionId }).then(
+      (value) => {
+        if (live) setStatus(value);
+      },
+      (error: unknown) => {
+        if (live) setLoadError(error instanceof Error ? error.message : String(error));
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [connectionId]);
+  const refresh = (selected?: "month" | "year"): void => {
+    void action.run(async () => {
+      setLoadError(undefined);
+      setStatus(await call("connections.subscription", { connectionId, term: selected }));
+    });
+  };
+  const request = status?.request;
+  const eligible =
+    status !== undefined &&
+    status.expiresAt !== null &&
+    (status.state === "active" || status.state === "expired") &&
+    request?.status !== "pending";
+  return (
+    <div className="card">
+      <strong>{t("云端 Agent 订阅")}</strong>
+      {status && (
+        <p>
+          {t({ active: "授权有效", paused: "授权已暂停", revoked: "授权已撤销", expired: "授权已到期" }[status.state])}
+          {" · "}
+          {status.expiresAt === null
+            ? t("长期有效")
+            : t("到期时间 {date}", { date: new Date(status.expiresAt).toLocaleString() })}
+          {status.expiresAt !== null &&
+            status.state === "active" &&
+            ` · ${t("剩余 {days} 天", { days: Math.max(0, Math.ceil((status.expiresAt - Date.now()) / 86400000)) })}`}
+        </p>
+      )}
+      {request && (
+        <p>
+          {t(request.term === "month" ? "1 个月" : "1 年")} ·{" "}
+          {t(
+            {
+              pending: "待审核",
+              approved: "申请已批准",
+              rejected: "申请已拒绝",
+            }[request.status],
+          )}
+        </p>
+      )}
+      <div className="seat-row">
+        <select
+          aria-label={t("申请期限")}
+          disabled={!eligible || action.busy}
+          value={term}
+          onChange={(event) => setTerm(event.target.value === "year" ? "year" : "month")}
+        >
+          <option value="month">{t("1 个月")}</option>
+          <option value="year">{t("1 年")}</option>
+        </select>
+        <button type="button" disabled={!eligible || action.busy} onClick={() => refresh(term)}>
+          {t("申请订阅")}
+        </button>
+        <button type="button" disabled={action.busy} onClick={() => refresh()}>
+          {t("刷新状态")}
+        </button>
+      </div>
+      {(action.error ?? loadError) && <p className="error">{action.error ?? loadError}</p>}
+    </div>
+  );
+}
+
+export function ConnectionsPage({ initialCloudError }: { initialCloudError?: string | undefined }): JSX.Element {
   const { library, error: loadError } = useLibrary();
   /**
    * The connection being edited, or `undefined` for a new one. Editing keeps
@@ -75,8 +166,6 @@ export function ConnectionsPage(): JSX.Element {
   const [name, setName] = useState("");
   const [mode, setMode] = useState<AuthMode>("subscription");
   const [backend, setBackend] = useState<ConnectionBackend>("claude-code");
-  const [source, setSource] = useState<"local" | "octopus">("local");
-  const [cloud, setCloud] = useState<CloudConnection>(emptyCloud);
   const [model, setModel] = useState("");
   const [endpoint, setEndpoint] = useState("");
   const [credentialRef, setCredentialRef] = useState("");
@@ -97,8 +186,6 @@ export function ConnectionsPage(): JSX.Element {
     setEditing(connection.connectionId);
     setName(connection.displayName);
     setBackend(connection.backend);
-    setSource(connection.source ?? "local");
-    setCloud(connection.cloud ?? emptyCloud());
     setMode(connection.authMode);
     setModel(connection.modelId ?? "");
     setEndpoint(connection.endpoint ?? "");
@@ -118,8 +205,6 @@ export function ConnectionsPage(): JSX.Element {
     setMode("subscription");
     setModel("");
     setBackend("claude-code");
-    setSource("local");
-    setCloud(emptyCloud());
     setEndpoint("");
     setCredentialRef("");
     setStoredRef(undefined);
@@ -134,13 +219,12 @@ export function ConnectionsPage(): JSX.Element {
       displayName: name.trim(),
       authMode: mode,
       backend,
-      source,
-      ...(source === "octopus" ? { cloud } : {}),
+      source: "local",
       ...(model.trim() === "" ? {} : { modelId: model.trim() }),
-      ...(source === "local" && mode === "api-key" && endpoint.trim() !== "" ? { endpoint: endpoint.trim() } : {}),
+      ...(mode === "api-key" && endpoint.trim() !== "" ? { endpoint: endpoint.trim() } : {}),
       // Derived unless the person named an existing secret: they have a key,
       // and the filing is the system's job.
-      ...(source === "octopus" || mode !== "api-key"
+      ...(mode !== "api-key"
         ? {}
         : {
             credentialRef:
@@ -155,7 +239,7 @@ export function ConnectionsPage(): JSX.Element {
     const saved = await action.run(() =>
       call("connections.save", {
         connection,
-        ...(source === "local" && mode === "api-key" && !existing && key !== "" ? { credential: key } : {}),
+        ...(mode === "api-key" && !existing && key !== "" ? { credential: key } : {}),
       }),
     );
     if (saved === undefined) return;
@@ -192,6 +276,9 @@ export function ConnectionsPage(): JSX.Element {
             "连接可选择本地或云端来源。现有本地登录和 API 配置继续使用；云端模型凭据留在服务器，业务工具在团队项目目录执行。",
           )}
         </p>
+        {!connections.some(
+          (connection) => connection.cloud?.managedDeviceId !== undefined && connection.cloud.port !== 22,
+        ) && <CloudActivation initialError={initialCloudError} />}
         {loadError !== undefined && <div className="error">{loadError}</div>}
 
         {connections.length === 0 && library !== undefined && (
@@ -228,13 +315,18 @@ export function ConnectionsPage(): JSX.Element {
                 </span>
               )}
               <span style={{ flex: 1 }} />
-              <button type="button" className="link" onClick={() => edit(connection)}>
-                {t("编辑")}
-              </button>
+              {connection.source !== "octopus" && (
+                <button type="button" className="link" onClick={() => edit(connection)}>
+                  {t("编辑")}
+                </button>
+              )}
               <button type="button" className="link danger" onClick={() => void remove(connection)}>
                 {t("删除")}
               </button>
             </div>
+            {connection.cloud?.managedDeviceId !== undefined && (
+              <CloudSubscription connectionId={connection.connectionId} />
+            )}
             {connection.source === "octopus" && connection.cloud?.quotaProvider !== undefined && (
               <Quota key={JSON.stringify(connection.cloud)} connectionId={connection.connectionId} />
             )}
@@ -245,135 +337,24 @@ export function ConnectionsPage(): JSX.Element {
           <div className="card-title">{editing === undefined ? t("新建连接") : t("编辑「{name}」", { name })}</div>
           <div className="seat-row">
             <input value={name} placeholder={t("连接名")} onChange={(event) => setName(event.target.value)} />
-            <select
-              aria-label={t("运行来源")}
-              value={source}
-              onChange={(event) => {
-                const next = event.target.value as "local" | "octopus";
-                setSource(next);
-                if (next === "octopus") {
-                  setBackend("codex");
-                  setMode("api-key");
-                }
-              }}
-            >
-              <option value="local">{t("本地")}</option>
-              <option value="octopus">{t("云端（SSH）")}</option>
-            </select>
-            <select
-              value={backend}
-              disabled={source === "octopus"}
-              onChange={(event) => setBackend(event.target.value as ConnectionBackend)}
-            >
+            <select value={backend} onChange={(event) => setBackend(event.target.value as ConnectionBackend)}>
               <option value="claude-code">Claude Code</option>
               <option value="codex">{t("Codex（ChatGPT / OpenAI）")}</option>
               <option value="dsh">DeepSeek Harness</option>
             </select>
-            {source !== "local" ? (
-              <span className="muted">{t("模型认证由云端配置")}</span>
-            ) : (
-              <select value={mode} onChange={(event) => setMode(event.target.value as AuthMode)}>
-                <option value="subscription">{t("订阅（用本机 CLI 的登录态）")}</option>
-                <option value="api-key">API key</option>
-              </select>
-            )}
+            <select value={mode} onChange={(event) => setMode(event.target.value as AuthMode)}>
+              <option value="subscription">{t("订阅（用本机 CLI 的登录态）")}</option>
+              <option value="api-key">API key</option>
+            </select>
           </div>
           <div className="seat-row">
             <input
               value={model}
-              placeholder={
-                source === "octopus"
-                  ? t("模型（留空沿用云端配置）")
-                  : mode === "subscription"
-                    ? t("模型（只能是 {backend} 自家的）", { backend })
-                    : t("模型")
-              }
+              placeholder={mode === "subscription" ? t("模型（只能是 {backend} 自家的）", { backend }) : t("模型")}
               onChange={(event) => setModel(event.target.value)}
             />
           </div>
-          {source !== "octopus" ? null : (
-            <>
-              <div className="seat-row">
-                <input
-                  aria-label={t("SSH 主机")}
-                  placeholder={t("SSH 主机")}
-                  value={cloud.host}
-                  onChange={(e) => setCloud({ ...cloud, host: e.target.value.trim() })}
-                />
-                <input
-                  aria-label={t("SSH 端口")}
-                  type="number"
-                  value={cloud.port}
-                  onChange={(e) => setCloud({ ...cloud, port: Number(e.target.value) })}
-                />
-                <input
-                  aria-label={t("SSH 用户")}
-                  placeholder={t("SSH 用户")}
-                  value={cloud.user}
-                  onChange={(e) => setCloud({ ...cloud, user: e.target.value.trim() })}
-                />
-              </div>
-              <div className="seat-row">
-                <input
-                  aria-label={t("本机 SSH 私钥路径")}
-                  placeholder={t("本机 SSH 私钥路径")}
-                  value={cloud.identityFile}
-                  onChange={(e) => setCloud({ ...cloud, identityFile: e.target.value })}
-                />
-              </div>
-              <div className="seat-row">
-                <input
-                  aria-label={t("本机 known_hosts 路径")}
-                  placeholder={t("本机 known_hosts 路径")}
-                  value={cloud.knownHostsFile}
-                  onChange={(e) => setCloud({ ...cloud, knownHostsFile: e.target.value })}
-                />
-              </div>
-              <div className="seat-row">
-                <input
-                  aria-label={t("云端运行程序")}
-                  placeholder={t("云端运行程序")}
-                  value={cloud.executable}
-                  onChange={(e) => setCloud({ ...cloud, executable: e.target.value.trim() })}
-                />
-                <input
-                  aria-label={t("云端运行用户")}
-                  placeholder={t("云端运行用户")}
-                  value={cloud.runAs}
-                  onChange={(e) => setCloud({ ...cloud, runAs: e.target.value.trim() })}
-                />
-                <input
-                  aria-label={t("远端配置版本")}
-                  placeholder={t("远端配置版本")}
-                  value={cloud.revision}
-                  onChange={(e) => setCloud({ ...cloud, revision: e.target.value.trim() })}
-                />
-                <label>
-                  {t("订阅额度来源")}
-                  <select
-                    value={cloud.quotaProvider ?? ""}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      setCloud({
-                        ...cloud,
-                        quotaProvider: value === "chatgpt" || value === "minimax" ? value : undefined,
-                      });
-                    }}
-                  >
-                    <option value="">{t("不查询")}</option>
-                    <option value="chatgpt">ChatGPT / Codex</option>
-                    <option value="minimax">MiniMax M Plan</option>
-                  </select>
-                </label>
-              </div>
-              <p className="muted">
-                {t(
-                  "沿用席位权限和团队目录。更换云端账户后请递增远端配置版本；云端故障会明确报错，不自动改用本地模型。",
-                )}
-              </p>
-            </>
-          )}
-          {source !== "local" || mode !== "api-key" ? null : (
+          {mode !== "api-key" ? null : (
             <>
               <div className="seat-row">
                 <input
@@ -413,10 +394,7 @@ export function ConnectionsPage(): JSX.Element {
           {/* Said before the save: the host refuses a foreign model on a
               subscription, and that reason is actionable only while the field
               is still in front of the person. */}
-          {source !== "local" ||
-          mode !== "subscription" ||
-          model.trim() === "" ||
-          isOwnModel(backend, model.trim()) ? null : (
+          {mode !== "subscription" || model.trim() === "" || isOwnModel(backend, model.trim()) ? null : (
             <p className="notice inline">
               {t(
                 "「{model}」不是 {backend} 自家的模型。订阅模式用的是本机 CLI 的登录态，这个名字会被发到那个端点，报出来的错会指向模型而不是这个不匹配。要用它就选 API key，填它自己的地址和密钥。",

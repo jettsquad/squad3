@@ -840,6 +840,54 @@ export function compose(env: AppEnvironment): Composed {
       changedAll();
       return { connection: saved };
     },
+    "connections.deviceStatus": async ({ connectionId }) => {
+      const connection = library.connections.get(connectionId);
+      if (connection === undefined) throw new Error("找不到连接。");
+      return seats.deviceStatus(connection);
+    },
+    "connections.activateCloud": async () => {
+      const connections = library.connections.views();
+      const found = connections.find((entry) => entry.cloud?.managedDeviceId !== undefined && entry.cloud.port !== 22);
+      const existing = found === undefined ? undefined : library.connections.get(found.connectionId);
+      const previous = connections.find(
+        (entry) => entry.cloud?.managedDeviceId !== undefined && entry.cloud.port === 22,
+      );
+      const activated = existing ?? (await seats.activate());
+      const connection =
+        existing ??
+        library.connections.save(
+          previous === undefined
+            ? activated
+            : {
+                ...activated,
+                connectionId: previous.connectionId,
+                displayName: previous.displayName,
+              },
+        );
+      const presetId = "squad-cloud-minimax-default";
+      if (library.agents.get(presetId) === undefined) {
+        library.agents.save({
+          templateId: presetId,
+          displayName: "云端 MiniMax",
+          backend: "codex",
+          connectionId: connection.connectionId,
+          role: "云端协作助手",
+          systemPrompt: "你是 Squad 的云端协作助手。按主持人的任务工作，依据实际结果作答。",
+          enabled: true,
+          color: "#9a6b36",
+          secretaryCandidate: true,
+          permissionMode: "read-only",
+          reasoningEffort: "low",
+        });
+      }
+      changedAll();
+      return { connection };
+    },
+    "connections.subscription": async ({ connectionId, term }) => {
+      const connection = library.connections.get(connectionId);
+      if (connection === undefined) throw new Error("找不到连接。");
+      return seats.subscription(connection, term);
+    },
     "connections.remove": async ({ connectionId }) => {
       // Refused while anything points at it: removed, it would surface at the
       // next round as a seat that cannot start.
