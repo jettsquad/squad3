@@ -14,7 +14,7 @@
  */
 import { useState, type JSX } from "react";
 import { credentialRefFor, isOwnModel, type AuthMode, type ConnectionBackend } from "../../shared/index.ts";
-import type { ConnectionViewWire, ConnectionWire } from "../../shared/wire.ts";
+import type { ConnectionViewWire, ConnectionWire, MethodOutput } from "../../shared/wire.ts";
 import { call, useAction } from "./api.ts";
 import { BACKEND_LABELS, libraryChanged, useLibrary } from "./library.ts";
 import { t } from "./locale.ts";
@@ -30,6 +30,39 @@ const emptyCloud = (): CloudConnection => ({
   runAs: "octopus-g0",
   revision: "1",
 });
+
+function Quota({ connectionId }: { connectionId: string }): JSX.Element {
+  const action = useAction();
+  const [quota, setQuota] = useState<MethodOutput<"connections.quota">>();
+  return (
+    <div className="card">
+      <button
+        type="button"
+        disabled={action.busy}
+        onClick={() =>
+          void action.run(async () => {
+            setQuota(undefined);
+            setQuota(await call("connections.quota", { connectionId }));
+          })
+        }
+      >
+        {t(action.busy ? "正在查询额度…" : "查询订阅额度")}
+      </button>
+      {quota?.windows.map((window, index) => (
+        <p key={index}>
+          {window.label} · {t("剩余 {percent}%", { percent: Number(window.remainingPercent.toFixed(1)) })}
+          {window.resetsAt !== undefined && ` · ${t("重置时间")} ${new Date(window.resetsAt).toLocaleString()}`}
+        </p>
+      ))}
+      {quota && (
+        <p className="muted">
+          {t("查询时间")} {new Date(quota.checkedAt).toLocaleString()}
+        </p>
+      )}
+      {action.error && <p className="error">{action.error}</p>}
+    </div>
+  );
+}
 
 export function ConnectionsPage(): JSX.Element {
   const { library, error: loadError } = useLibrary();
@@ -165,41 +198,46 @@ export function ConnectionsPage(): JSX.Element {
           <p className="muted">{t("还没有连接。不建也行——Agent 默认用本机登录。")}</p>
         )}
         {connections.map((connection) => (
-          <div className="list-row" key={connection.connectionId}>
-            <strong>{connection.displayName}</strong>
-            <span className="muted">
-              {BACKEND_LABELS[connection.backend] ?? connection.backend} ·{" "}
-              {connection.source === "octopus"
-                ? `${t("云端")} · ${connection.cloud?.host ?? ""} · `
-                : `${t("本地")} · `}
-              {connection.authMode === "subscription" ? t("订阅") : "API key"}
-              {connection.modelId === undefined ? "" : ` · ${connection.modelId}`}
-              {connection.endpoint === undefined ? "" : ` · ${connection.endpoint}`}
-            </span>
-            {connection.source === "octopus" ? (
-              <span className="badge">{t("模型凭据在云端")}</span>
-            ) : connection.authMode !== "api-key" ? null : connection.credentialProblem !== undefined ? (
-              <span className="badge bad" title={connection.credentialProblem}>
-                {t("凭据名不合法，点「编辑」重新填 key")}
+          <div key={connection.connectionId}>
+            <div className="list-row">
+              <strong>{connection.displayName}</strong>
+              <span className="muted">
+                {BACKEND_LABELS[connection.backend] ?? connection.backend} ·{" "}
+                {connection.source === "octopus"
+                  ? `${t("云端")} · ${connection.cloud?.host ?? ""} · `
+                  : `${t("本地")} · `}
+                {connection.authMode === "subscription" ? t("订阅") : "API key"}
+                {connection.modelId === undefined ? "" : ` · ${connection.modelId}`}
+                {connection.endpoint === undefined ? "" : ` · ${connection.endpoint}`}
               </span>
-            ) : connection.credentialConfigured ? (
-              <span className="badge ok">{t("密钥已配置")}</span>
-            ) : connection.credentialWritable ? (
-              <span className="badge bad">{t("密钥未配置")}</span>
-            ) : (
-              // `set` refuses while a read-only source shadows the name, so the
-              // key box would silently keep failing without this.
-              <span className="badge bad">
-                {t("密钥名「{name}」被只读来源占了，这里改不了", { name: connection.credentialRef ?? "" })}
-              </span>
+              {connection.source === "octopus" ? (
+                <span className="badge">{t("模型凭据在云端")}</span>
+              ) : connection.authMode !== "api-key" ? null : connection.credentialProblem !== undefined ? (
+                <span className="badge bad" title={connection.credentialProblem}>
+                  {t("凭据名不合法，点「编辑」重新填 key")}
+                </span>
+              ) : connection.credentialConfigured ? (
+                <span className="badge ok">{t("密钥已配置")}</span>
+              ) : connection.credentialWritable ? (
+                <span className="badge bad">{t("密钥未配置")}</span>
+              ) : (
+                // `set` refuses while a read-only source shadows the name, so the
+                // key box would silently keep failing without this.
+                <span className="badge bad">
+                  {t("密钥名「{name}」被只读来源占了，这里改不了", { name: connection.credentialRef ?? "" })}
+                </span>
+              )}
+              <span style={{ flex: 1 }} />
+              <button type="button" className="link" onClick={() => edit(connection)}>
+                {t("编辑")}
+              </button>
+              <button type="button" className="link danger" onClick={() => void remove(connection)}>
+                {t("删除")}
+              </button>
+            </div>
+            {connection.source === "octopus" && connection.cloud?.quotaProvider !== undefined && (
+              <Quota key={JSON.stringify(connection.cloud)} connectionId={connection.connectionId} />
             )}
-            <span style={{ flex: 1 }} />
-            <button type="button" className="link" onClick={() => edit(connection)}>
-              {t("编辑")}
-            </button>
-            <button type="button" className="link danger" onClick={() => void remove(connection)}>
-              {t("删除")}
-            </button>
           </div>
         ))}
 
@@ -310,6 +348,23 @@ export function ConnectionsPage(): JSX.Element {
                   value={cloud.revision}
                   onChange={(e) => setCloud({ ...cloud, revision: e.target.value.trim() })}
                 />
+                <label>
+                  {t("订阅额度来源")}
+                  <select
+                    value={cloud.quotaProvider ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setCloud({
+                        ...cloud,
+                        quotaProvider: value === "chatgpt" || value === "minimax" ? value : undefined,
+                      });
+                    }}
+                  >
+                    <option value="">{t("不查询")}</option>
+                    <option value="chatgpt">ChatGPT / Codex</option>
+                    <option value="minimax">MiniMax M Plan</option>
+                  </select>
+                </label>
               </div>
               <p className="muted">
                 {t(

@@ -7,7 +7,10 @@ import { createClaudeCodeAdapter } from "./claude-code/adapter.ts";
 import { createCodexAdapter } from "./codex/adapter.ts";
 import { createDshAdapter } from "./dsh/adapter.ts";
 import type { SeatAdapter } from "./types.ts";
-import { createCloudAdapter } from "./cloud/adapter.ts";
+import { createCloudAdapter, readCloudQuota } from "./cloud/adapter.ts";
+import { cloudExecutions } from "./cloud/executions.ts";
+import type { SeatConnection } from "../../shared/connection.ts";
+import type { ComputerApproval } from "./cloud/computer.ts";
 
 export type { ResolvedConnection, SeatAdapter, SeatCapabilities, SeatRequest } from "./types.ts";
 
@@ -34,16 +37,23 @@ export interface SeatsOptions {
   readonly resolve?: (name: string) => ResolvedCommand;
   /** The dsh path from settings, read at each start. */
   readonly dshCommand?: () => string | undefined;
+  readonly approveComputer?: ComputerApproval | undefined;
 }
 
-export function createSeats(options: SeatsOptions): Seats {
+export function createSeats(options: SeatsOptions) {
   const resolve = options.resolve ?? liveCommandResolver();
   const adapters = new Map<string, SeatAdapter>([
     ["claude-code", createClaudeCodeAdapter(resolve, options.stateDir)],
     ["codex", createCodexAdapter(resolve)],
     ["dsh", createDshAdapter({ resolve, stateDir: options.stateDir, configuredCommand: options.dshCommand })],
   ]);
-  const cloud = createCloudAdapter({ stateDir: options.stateDir, resolve });
+  const active = new Set<string>();
+  const cloud = createCloudAdapter({
+    stateDir: options.stateDir,
+    resolve,
+    active,
+    approveComputer: options.approveComputer,
+  });
   const localCodex = adapters.get("codex");
   if (localCodex !== undefined)
     adapters.set("codex", {
@@ -54,7 +64,9 @@ export function createSeats(options: SeatsOptions): Seats {
         request.connection?.connection.source === "octopus" ? cloud.start(request) : localCodex.start(request),
     });
   return {
-    adapterFor: (backend) =>
+    executions: cloudExecutions(options.stateDir, active),
+    quota: (connection: SeatConnection) => readCloudQuota(connection, resolve),
+    adapterFor: (backend: string) =>
       adapters.get(backend) ??
       // Said, not hidden: a backend the form offers but no adapter serves is
       // exactly the 2.x failure 「存得下、显示得出、然后被忽略」.

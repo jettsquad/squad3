@@ -32,6 +32,7 @@ import { compose } from "./compose.ts";
 import { createDispatcher } from "./ipc/index.ts";
 import { prepareLocalUpdate, type LocalUpdateFeed } from "./updates/index.ts";
 import { homedir } from "node:os";
+import { activateDataDirectory, scheduleDataMove } from "./data-directory.ts";
 
 // The main bundle is an ES module, which has no `__dirname`.
 const here = dirname(fileURLToPath(import.meta.url));
@@ -243,13 +244,47 @@ function allowMicrophoneOnly(): void {
 
 void app.whenReady().then(() => {
   allowMicrophoneOnly();
+  const defaultDataDir = app.getPath("userData");
+  let dataDir: string;
+  try {
+    dataDir = activateDataDirectory(defaultDataDir);
+  } catch (error) {
+    dialog.showErrorBox("Squad 数据目录错误", error instanceof Error ? error.message : String(error));
+    app.quit();
+    return;
+  }
   // Windows shows a toast only for an app it can name. Installed, that is the
   // installer's id (phase 6); run from source, the executable's own path.
   if (process.platform === "win32") app.setAppUserModelId(app.isPackaged ? "com.squad.desktop" : process.execPath);
   const composed = compose({
     name: app.getName(),
     version: app.getVersion(),
-    dataDir: app.getPath("userData"),
+    dataDir,
+    approveComputer: async (targetApp, seatName) => {
+      const options = {
+        type: "question" as const,
+        title: "云端席位请求使用 Computer Use",
+        message: `允许云端席位「${seatName}」访问本机应用「${targetApp}」？`,
+        detail: "允许后，此席位可在当前任务中查看和操作该应用。拒绝后不会执行该次操作。",
+        buttons: ["拒绝", "允许本次任务"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      };
+      const result =
+        window === undefined ? await dialog.showMessageBox(options) : await dialog.showMessageBox(window, options);
+      return result.response === 1;
+    },
+    moveData: async () => {
+      const picked = await dialog.showOpenDialog({
+        title: "选择新的空数据文件夹",
+        properties: ["openDirectory", "createDirectory"],
+      });
+      if (picked.canceled || picked.filePaths[0] === undefined) return;
+      scheduleDataMove(defaultDataDir, picked.filePaths[0]);
+      app.relaunch();
+      setTimeout(() => app.quit(), 200);
+    },
     // DPAPI on Windows, Keychain on macOS. Where neither is there, the vault
     // refuses to store a key rather than writing it in the clear.
     cipher: {
@@ -401,7 +436,7 @@ void app.whenReady().then(() => {
   });
 
   window = createWindow();
-  createTray(composed, app.getPath("userData"));
+  createTray(composed, dataDir);
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) window = createWindow();
   });

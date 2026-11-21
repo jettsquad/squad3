@@ -10,18 +10,18 @@ Squad 3 新增运行来源 `octopus`，首个后端为 Codex。未填写来源�
 
 部署填写示例（实际地址与本机路径按自己的环境填写）：
 
-| 字段 | 实测值 |
+| 字段 | 示例值 |
 | --- | --- |
 | 主机 / 端口 | example.com / 22 |
-| SSH 用户 | root |
-| 本机 SSH 私钥路径 | C:/Users/<user>/.ssh/octopus-g0-ed25519 |
-| 本机 known_hosts 路径 | C:/Users/<user>/.ssh/octopus-g0-known-hosts |
-| 云端运行用户 | octopus-g0 |
-| 云端程序 | /opt/octopus-g0/bin/codex-minimax |
+| SSH 用户 | ssh-user |
+| 本机 SSH 私钥路径 | C:/Users/<user>/.ssh/cloud-key |
+| 本机 known_hosts 路径 | C:/Users/<user>/.ssh/known_hosts |
+| 云端运行用户 | codex-runner |
+| 云端程序 | /opt/codex-runner/bin/codex |
 | 模型 | MiniMax-M3.1-Flash，也可留空沿用服务器 |
 | 配置版本 | 1；更换远端账户时递增 |
 
-主机记录已从初次实验目录复制到用户 .ssh 下的稳定位置。上表是配置示例，其他机器按实际位置填写；只引用文件位置，不记录私钥或 API Key 内容。SSH 采用严格主机键检查，不自动接受新主机。
+上表是配置示例，按实际环境填写；只引用文件位置，不记录私钥或 API Key 内容。SSH 采用严格主机键检查，不自动接受新主机。
 
 ## 执行与兼容
 
@@ -29,11 +29,21 @@ Squad 3 新增运行来源 `octopus`，首个后端为 Codex。未填写来源�
 
 云端使用官方 app-server 的动态工具回调；业务 shell 在本地独立、无模型登录的 Codex app-server 执行。它收到的是当前团队 cwd、席位的 read-only/workspace/yolo 和联网设置。不会把本机进程环境或模型凭据序列化给云端。Windows 显式启用原生 unelevated 沙箱；yolo 保留其原有完全访问含义，不自动提升其他模式。
 
-云端无执行环境，只提供 workstation_shell 和 workstation_image；后者按项目内最终路径读取真实图像，限 1 MiB 的 PNG/JPEG/WebP。云端的原生 shell、插件等还依赖服务器运行时配置关闭；当前服务器已配置关闭，不能将 developer prompt 当作唯一限制。
+云端可调用本机的 workstation_shell、workstation_image 和 workstation_computer；图像工具按项目内最终路径读取真实图像，限 1 MiB 的 PNG/JPEG/WebP。Computer Use 通过本机 Codex 运行时操作窗口，支持列出窗口、观察、点击、输入、按键和滚动；目前仅在席位选择 yolo 权限时开放。访问应用时默认逐次授权，也可在席位设置中预先授权。该功能依赖本机 Codex 支持 node_repl 和 computer-use。云端的原生 shell、插件等还依赖服务器运行时配置关闭，不能将 developer prompt 当作唯一限制。
 
 连续会话使用不透明句柄，绑定连接/profile 配置、模型、项目、席位及 Squad 场次。改来源/远端配置后在发送工具之前重建完整上下文。只有结构化的前置续接拒绝允许重试；网络/执行错误不按错误文本清空并自动重跑。计数取运行时总量的本回合差值，缓存输入单列。
 
-取消会关闭新工具入口、中断云端回合并清理本地进程树。断线或本地执行结果无法确认时保留项目保护记录，后续云端命令拒绝执行；不会静默切换为本地模型。记录位于 Squad 数据目录 seats/cloud-pending，必须核对实际执行结果后才能由维护人员清理对应记录，不能以删除记录替代核对。本版没有自动重连/回放/完整对账 UI。
+取消会关闭新工具入口、中断云端回合并清理本地进程树。断线或本地执行结果无法确认时保留项目保护记录，后续云端命令拒绝执行。打开侧栏「待处理」查看记录的状态、退出码和留存输出。核对实际结果后填写结论，Squad 将证据与结论保留在数据目录 `seats/cloud-reconciled`，再解除项目阻止。运行中、记录已变更或归档写入失败时，拒绝解除。这个操作不会自动重跑命令或恢复远端对话。「待处理」也汇总跨团队的议程草案、待裁定节点和仍在运行或中断的指令。
+
+## 查询订阅额度
+
+在云端连接中选「订阅额度来源」，保存后点「查询订阅额度」。界面按供应商返回的周期显示剩余百分比、重置时间与查询时间。使用 ChatGPT 登录的远端 Codex 通过官方 `account/rateLimits/read` 查询。MiniMax M Plan 则需要在该连接的远端包装程序里提供 `squad-quota` 子命令。
+
+部署 MiniMax 时，将 [tools/minimax-quota.py](../tools/minimax-quota.py) 安装到服务器，并让包装程序仅在收到单个参数 `squad-quota` 时执行 `python3 /服务器路径/minimax-quota.py cn /服务器密钥文件路径`。国际站用 `global`。密钥文件由远端运行用户读取，必须是 MiniMax 订阅 Key。包装程序对其它参数沿用既有 Codex 启动逻辑。子命令只向标准输出写额度窗口的 JSON 数组。查询失败由 Squad 显示错误。
+
+## 审阅产物
+
+在团队右栏打开「产物审阅」，选择报告或议程产物，也可输入项目内的相对路径。当前支持 256 KiB 以内的 UTF-8 Markdown 和文本。按行添加批注后选择席位，将批注、对应原文摘录和文件路径一次发到当前讨论。发送前校验文件内容版本，文件变更后需要重新打开并核对批注。修改完成后可以重新打开产物检查。
 
 ## 验证与限制
 
@@ -45,6 +55,6 @@ Squad 3 新增运行来源 `octopus`，首个后端为 Codex。未填写来源�
 
 真实样例证据在本机 .tmp/cloud-live-result.json 和 .tmp/cloud-compose-result.json；它们是本地实验记录，不作为测试夹具提交。文档中的实测不等于整个云端 MVP 验收已完成。
 
-当前边界：只接 Codex；不支持云端席位开启本机 hostCustomizations 或 subagents，开启时明确拒绝。MiniMax 的思考档位必须由该模型支持，首个配置实测使用 low。unelevated 的网络/读路径隔离有限，部分启动子进程的测试可能报 EPERM，需按所选本地权限和执行环境排查；不通过关闭权限来自动补救。正式交互授权 UI、自动恢复、跨后端和完整云端转录清理不在本次接入完成声明内。
+当前边界：只接 Codex；不支持云端席位开启本机 hostCustomizations 或 subagents，开启时明确拒绝。MiniMax 的思考档位必须由该模型支持，首个配置实测使用 low。unelevated 的网络/读路径隔离有限，部分启动子进程的测试可能报 EPERM，需按所选本地权限和执行环境排查；不通过关闭权限来自动补救。自动恢复、跨后端和完整云端转录清理不在本次接入完成声明内。
 
 新版连接界面的控件树可读取，截图工具报 `window capture timed out`，界面点选/保存/编辑的手动实测未完成；没有将对应清单勾为通过。主进程实际 IPC 保存/读取与上述真实模型调用已经验证。

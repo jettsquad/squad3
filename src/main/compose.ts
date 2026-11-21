@@ -49,6 +49,7 @@ import { createSeats, liveCommandResolver, type ResolvedConnection } from "./sea
 import { createSecretary } from "./secretary/index.ts";
 import { createStore } from "./store/index.ts";
 import { createTable, writeReport, type Table } from "./table/index.ts";
+import { listArtifacts, readArtifact } from "./artifacts.ts";
 
 /** How many lines the window loads at once, newest first; 「更早的」 brings back as many again. */
 const TRANSCRIPT_PAGE = 150;
@@ -108,6 +109,8 @@ export interface AppEnvironment {
   /** Seals keys in the vault: Electron's `safeStorage` in the app. */
   readonly cipher: Cipher;
   readonly pickFolder: () => Promise<string | null>;
+  readonly moveData?: (() => Promise<void>) | undefined;
+  readonly approveComputer?: ((app: string, seatName: string) => Promise<boolean>) | undefined;
   /** The system file dialog, several at once. Empty when the person cancels. */
   readonly pickFiles: () => Promise<readonly string[]>;
   /** Open a validated project file with the operating system's default app. */
@@ -172,6 +175,7 @@ export function compose(env: AppEnvironment): Composed {
   const library = createLibrary({ dataDir: env.dataDir, vault });
   const seats = createSeats({
     stateDir: join(env.dataDir, "seats"),
+    approveComputer: env.approveComputer,
     // Read at each start: a path fixed in 「设置」 reaches the next turn.
     dshCommand: () => library.settings.get().dshCommand,
   });
@@ -379,6 +383,14 @@ export function compose(env: AppEnvironment): Composed {
   };
 
   const handlers: Handlers = {
+    "app.data.move": async () => {
+      if (env.moveData === undefined) throw new Error("当前环境不支持迁移数据。");
+      if (built.list().teams.some((team) => team.busy || team.agenda.running !== undefined)) {
+        throw new Error("请先等待所有团队完成当前任务。");
+      }
+      await env.moveData();
+      return {};
+    },
     "app.info": async () => ({
       name: env.name,
       version: env.version,
@@ -768,8 +780,8 @@ export function compose(env: AppEnvironment): Composed {
       built.removeSeat(teamId, seatId, confirmSecretary === undefined ? {} : { confirmSecretary });
       return {};
     },
-    "seats.patch": async ({ teamId, seatId, connectionId, caps }) => {
-      built.patchSeat(teamId, seatId, { connectionId, caps });
+    "seats.patch": async ({ teamId, seatId, connectionId, caps, computerAccess }) => {
+      built.patchSeat(teamId, seatId, { connectionId, caps, computerAccess });
       return {};
     },
     "seats.relink": async ({ teamId, seatId, templateId }) => {
@@ -777,6 +789,45 @@ export function compose(env: AppEnvironment): Composed {
       return {};
     },
     "connections.list": async () => ({ connections: [...library.connections.views()] }),
+    "connections.quota": async ({ connectionId }) => {
+      const connection = library.connections.get(connectionId);
+      if (connection === undefined) throw new Error("找不到连接。");
+      return seats.quota(connection);
+    },
+    "cloud.executions": async () => seats.executions.list(),
+    "cloud.reconcile": async ({ id, version, note }) => {
+      seats.executions.reconcile(id, version, note);
+      return {};
+    },
+    "artifacts.list": async ({ teamId }) => {
+      const team = summaryOf(teamId);
+      const planned =
+        team.agenda.confirmed?.agenda.phases.flatMap((phase) =>
+          phase.tasks.flatMap((task) => (task.artifactPath === undefined ? [] : [task.artifactPath])),
+        ) ?? [];
+      return { paths: await listArtifacts(folderOf(teamId), planned) };
+    },
+    "artifacts.read": async ({ teamId, path }) => readArtifact(folderOf(teamId), path),
+    "artifacts.feedback": async ({ teamId, path, version, seatId, comments }) => {
+      const current = await readArtifact(folderOf(teamId), path);
+      if (current.version !== version) throw new Error("产物已发生变化，请重新打开后核对批注。");
+      const lines = current.text.split(/\r?\n/);
+      const notes = comments.map(({ from, to, note }) => {
+        if (from > to || to > lines.length || to - from >= 20)
+          throw new Error("批注范围必须在文件内，每条最多 20 行。");
+        return `第 ${from}–${to} 行\n原文摘录：${JSON.stringify(
+          lines
+            .slice(from - 1, to)
+            .join("\n")
+            .slice(0, 1800),
+        )}\n审阅意见：${note}`;
+      });
+      return built.sendFeedback(
+        teamId,
+        seatId,
+        `请根据以下审阅意见修订项目产物 ${JSON.stringify(path)}，逐项说明处理结果。\n\n${notes.join("\n\n")}`,
+      );
+    },
     "connections.save": async ({ connection, credential }) => {
       if (connection.source === "octopus" && (credential ?? "").trim() !== "")
         throw new Error("云端模型凭据只在服务器配置，不保存在本机连接里。");

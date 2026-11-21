@@ -121,11 +121,15 @@ export class CloudRpc {
     });
   }
 
-  async initialize(): Promise<void> {
-    await this.request("initialize", {
-      clientInfo: { name: "squad3_cloud", version: "1.0.0" },
-      capabilities: { experimentalApi: true },
-    });
+  async initialize(timeoutMs?: number): Promise<void> {
+    await this.request(
+      "initialize",
+      {
+        clientInfo: { name: "squad3_cloud", version: "1.0.0" },
+        capabilities: { experimentalApi: true },
+      },
+      timeoutMs,
+    );
     this.send({ method: "initialized", params: {} });
   }
 

@@ -103,6 +103,17 @@ describe("读取本机配置这个勾", () => {
   });
 });
 
+describe("Computer Use 授权", () => {
+  it("同步授权和撤销，旧席位默认未预先授权", () => {
+    const allowed = syncSeat(seat, { ...template, computerAccess: true });
+    expect(allowed.computerAccess).toBe(true);
+    expect(seatMatches(allowed, { ...template, computerAccess: false })).toBe(false);
+    expect(syncSeat(allowed, { ...template, computerAccess: false }).computerAccess).toBe(false);
+    const { computerAccess: _absent, ...old } = syncSeat(seat, template);
+    expect(seatMatches(old, template)).toBe(true);
+  });
+});
+
 describe("派生子 agent 这个勾", () => {
   it("在库里取消，已经坐着的席位也跟着取消", () => {
     const sat: SyncableSeat = { ...seat, subagents: true };

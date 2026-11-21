@@ -364,6 +364,7 @@ export interface Table {
     teamId: string,
     material: { readonly name: string; readonly text: string },
   ): { readonly materialId: string };
+  sendFeedback(teamId: string, seatId: string, text: string): { readonly commandId: string };
   /** Pinned material rides along with every command. */
   setMaterialPinned(teamId: string, materialId: string, pinned: boolean): void;
   removeMaterial(teamId: string, materialId: string): void;
@@ -425,7 +426,11 @@ export interface Table {
   patchSeat(
     teamId: string,
     seatId: string,
-    patch: { readonly connectionId?: string | undefined; readonly caps?: SeatCaps | undefined },
+    patch: {
+      readonly connectionId?: string | undefined;
+      readonly caps?: SeatCaps | undefined;
+      readonly computerAccess?: boolean | undefined;
+    },
   ): void;
   /** Point a seat at a library agent and take its settings. */
   relinkSeat(teamId: string, seatId: string, templateId: string): void;
@@ -990,6 +995,7 @@ export function createTable(deps: TableDeps): Table {
       ...(connectionId === "" ? {} : { connectionId }),
       ...(found === undefined ? {} : { connectionName: found.displayName }),
       ...(seat.permissionMode === undefined ? {} : { permissionMode: seat.permissionMode }),
+      ...(seat.computerAccess === undefined ? {} : { computerAccess: seat.computerAccess }),
       ...(seat.reasoningEffort === undefined ? {} : { reasoningEffort: seat.reasoningEffort }),
       ...(seat.caps === undefined ? {} : { caps: seat.caps }),
       ...(seat.color === undefined ? {} : { color: seat.color }),
@@ -2547,6 +2553,12 @@ export function createTable(deps: TableDeps): Table {
       return submit(teamId, trimmed, seatIds, quoteIds, materialIds, sentFor);
     },
 
+    sendFeedback: (teamId, seatId, text) => {
+      const seat = teamOf(teamId).seats.find((candidate) => candidate.seatId === seatId);
+      if (seat === undefined) throw new Error("所选席位已经不在团队里。");
+      return submit(teamId, `@${seat.displayName} ${text}`, [seatId], [], []);
+    },
+
     cancel,
 
     resend: (teamId, commandId) => {
@@ -2899,6 +2911,7 @@ export function createTable(deps: TableDeps): Table {
         ...seat,
         connectionId,
         ...(patch.caps === undefined ? {} : { caps: patch.caps }),
+        ...(patch.computerAccess === undefined ? {} : { computerAccess: patch.computerAccess }),
       });
       // A conversation belongs to the model that held it: resuming it on
       // another endpoint asks that endpoint for a session it never had.

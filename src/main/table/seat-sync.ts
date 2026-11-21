@@ -37,6 +37,7 @@ export interface SyncableSeat {
   readonly color?: string | undefined;
   readonly voiceId?: string | undefined;
   readonly webAccess?: boolean | undefined;
+  readonly computerAccess?: boolean | undefined;
   readonly hostCustomizations?: boolean | undefined;
   readonly subagents?: boolean | undefined;
   readonly reasoningEffort?: ReasoningEffort | undefined;
@@ -57,6 +58,7 @@ export interface TemplateFacts {
   readonly color?: string | undefined;
   readonly voiceId?: string | undefined;
   readonly webAccess?: boolean | undefined;
+  readonly computerAccess?: boolean | undefined;
   readonly hostCustomizations?: boolean | undefined;
   readonly subagents?: boolean | undefined;
   readonly reasoningEffort?: ReasoningEffort | undefined;
@@ -76,6 +78,7 @@ export function templateFacts(template: AgentTemplate): TemplateFacts {
     color: template.color,
     voiceId: template.voiceId,
     webAccess: template.webAccess,
+    computerAccess: template.computerAccess,
     hostCustomizations: template.hostCustomizations,
     subagents: template.subagents,
     reasoningEffort: template.reasoningEffort,
@@ -106,6 +109,7 @@ export function syncSeat<T extends SyncableSeat>(seat: T, template: TemplateFact
     // to reach the teams too, and a sync that only ever set `true` could
     // never carry that.
     webAccess: template.webAccess === true,
+    computerAccess: template.computerAccess === true,
     // Assigned, not added, for the same reason: unticking 「读取本机配置」 in
     // the library has to reach the seats that are already sitting.
     hostCustomizations: template.hostCustomizations === true,
@@ -131,6 +135,7 @@ export function seatMatches(seat: SyncableSeat, template: TemplateFacts): boolea
     next.color === seat.color &&
     next.voiceId === seat.voiceId &&
     next.webAccess === seat.webAccess &&
+    (next.computerAccess === true) === (seat.computerAccess === true) &&
     next.hostCustomizations === seat.hostCustomizations &&
     // Compared as booleans: a seat saved before this field existed has none,
     // and that is the same as off — not a difference worth a resync.

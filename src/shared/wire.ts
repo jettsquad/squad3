@@ -53,6 +53,7 @@ const connection = z
         executable: z.string(),
         runAs: z.string(),
         revision: z.string(),
+        quotaProvider: z.enum(["chatgpt", "minimax"]).optional(),
       })
       .strict()
       .optional(),
@@ -84,6 +85,7 @@ const agent = z
     color: z.string(),
     voiceId: z.string().optional(),
     webAccess: z.boolean().optional(),
+    computerAccess: z.boolean().optional(),
     hostCustomizations: z.boolean().optional(),
     subagents: z.boolean().optional(),
     enabled: z.boolean(),
@@ -141,6 +143,7 @@ const seatSummary = z.object({
   /** The connection's name, or absent for the host's own login. */
   connectionName: z.string().optional(),
   permissionMode: z.string().optional(),
+  computerAccess: z.boolean().optional(),
   reasoningEffort: z.string().optional(),
   caps: caps.optional(),
   color: z.string().optional(),
@@ -406,6 +409,7 @@ export const methods = {
     input: z.object({}).strict(),
     output: z.object({ name: z.string(), version: z.string(), platform: z.string(), dataDir: z.string() }),
   },
+  "app.data.move": { input: z.object({}).strict(), output: z.object({}) },
   /** Check the configured release feed for a newer installed app version. */
   "app.update.check": { input: z.object({}).strict(), output: z.object({}) },
   /** Install an already downloaded update and restart. */
@@ -555,7 +559,13 @@ export const methods = {
   /** Connection (`""` = the host's own login) and caps, in place. */
   "seats.patch": {
     input: z
-      .object({ teamId: z.string(), seatId: z.string(), connectionId: z.string().optional(), caps: caps.optional() })
+      .object({
+        teamId: z.string(),
+        seatId: z.string(),
+        connectionId: z.string().optional(),
+        caps: caps.optional(),
+        computerAccess: z.boolean().optional(),
+      })
       .strict(),
     output: z.object({}),
   },
@@ -568,6 +578,78 @@ export const methods = {
   "connections.list": {
     input: z.object({}).strict(),
     output: z.object({ connections: z.array(connectionView) }),
+  },
+  "connections.quota": {
+    input: z.object({ connectionId: z.string() }).strict(),
+    output: z.object({
+      checkedAt: z.number(),
+      windows: z.array(
+        z.object({
+          label: z.string(),
+          remainingPercent: z.number().min(0).max(100),
+          resetsAt: z.number().optional(),
+        }),
+      ),
+    }),
+  },
+  "cloud.executions": {
+    input: z.object({}).strict(),
+    output: z.object({
+      records: z.array(
+        z.object({
+          id: z.string(),
+          version: z.string(),
+          project: z.string().optional(),
+          at: z.number(),
+          state: z.enum(["running", "unknown", "completed", "unreadable"]),
+          callId: z.string().optional(),
+          digest: z.string().optional(),
+          exitCode: z.number().optional(),
+          stdout: z.string().optional(),
+          stderr: z.string().optional(),
+        }),
+      ),
+      recent: z.array(
+        z.object({
+          id: z.string(),
+          project: z.string().optional(),
+          note: z.string(),
+          reviewedAt: z.number(),
+        }),
+      ),
+    }),
+  },
+  "cloud.reconcile": {
+    input: z.object({ id: z.string(), version: z.string(), note: z.string().trim().min(1).max(2000) }).strict(),
+    output: z.object({}),
+  },
+  "artifacts.list": { input: teamRef, output: z.object({ paths: z.array(z.string()) }) },
+  "artifacts.read": {
+    input: z.object({ teamId: z.string(), path: z.string() }).strict(),
+    output: z.object({ text: z.string(), version: z.string() }),
+  },
+  "artifacts.feedback": {
+    input: z
+      .object({
+        teamId: z.string(),
+        path: z.string(),
+        version: z.string(),
+        seatId: z.string(),
+        comments: z
+          .array(
+            z
+              .object({
+                from: z.number().int().positive(),
+                to: z.number().int().positive(),
+                note: z.string().trim().min(1).max(2000),
+              })
+              .strict(),
+          )
+          .min(1)
+          .max(20),
+      })
+      .strict(),
+    output: z.object({ commandId: z.string() }),
   },
   /** `credential` is written to the vault and never read back. */
   "connections.save": {

@@ -98,6 +98,8 @@ export interface AgentTemplate {
    * else still asks, and the delegation fence still holds.
    */
   readonly webAccess?: boolean | undefined;
+  /** Preapprove local application access by this cloud agent. */
+  readonly computerAccess?: boolean | undefined;
   /**
    * Let this agent's `claude` read the HOST's own configuration.
    *

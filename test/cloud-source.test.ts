@@ -1,4 +1,5 @@
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,6 +10,7 @@ import { createLibrary } from "../src/main/library/index.ts";
 import { createVault } from "../src/main/vault/index.ts";
 import { createAgentCheck } from "../src/main/agent-check/index.ts";
 import type { SeatSpec } from "../src/shared/seat.ts";
+import { ComputerExecutor } from "../src/main/seats/cloud/computer.ts";
 
 const folders: string[] = [];
 afterEach(() => {
@@ -45,7 +47,14 @@ function setup(flavor = "chat", noLocal = false) {
     if (name === "codex") {
       localStarts++;
       if (noLocal) throw new Error("local CLI not installed");
-      return { file: process.execPath, prefixArgs: [resolve("test/fixtures/cloud-runtime.mjs"), "local"] };
+      return {
+        file: process.execPath,
+        prefixArgs: [
+          resolve("test/fixtures/cloud-runtime.mjs"),
+          "local",
+          ...(flavor === "computer-auto" ? ["computer-approval"] : []),
+        ],
+      };
     }
     return { file: "powershell.exe", prefixArgs: [] };
   };
@@ -62,6 +71,96 @@ function setup(flavor = "chat", noLocal = false) {
 }
 
 describe("cloud sources", () => {
+  it("uses the seat's explicit computer preauthorization and otherwise asks", async () => {
+    for (const preauthorized of [true, false]) {
+      const s = setup("computer-auto");
+      let prompts = 0;
+      const adapter = createCloudAdapter({
+        stateDir: join(s.dir, "state"),
+        resolve: s.resolver,
+        approveComputer: async () => {
+          prompts++;
+          return false;
+        },
+      });
+      const result = await adapter.start({
+        seat: { ...s.seat, permissionMode: "yolo", computerAccess: preauthorized },
+        connection: { connection: s.connection, env: {} },
+        cwd: s.dir,
+        prompt: "computer",
+      }).result;
+      expect(result.text).toContain(preauthorized ? "FIXTURE_APPROVED" : "未授权");
+      expect(prompts).toBe(preauthorized ? 0 : 1);
+    }
+  });
+  it("allows window discovery with an unresolved project record but keeps actions blocked", async () => {
+    for (const flavor of ["computer", "computer-click"]) {
+      const s = setup(flavor);
+      const pending = join(s.dir, "state", "cloud-pending");
+      mkdirSync(pending, { recursive: true });
+      const file = join(pending, createHash("sha256").update(s.dir).digest("hex") + ".json");
+      const original = JSON.stringify({ state: "pending", callId: "old-call" });
+      writeFileSync(file, original);
+      const result = await s.adapter.start({
+        seat: { ...s.seat, permissionMode: "yolo" },
+        connection: { connection: s.connection, env: {} },
+        cwd: s.dir,
+        prompt: "computer",
+      }).result;
+      expect(result.text).toContain(flavor === "computer" ? "FIXTURE_WINDOWS" : "待处理");
+      expect(readFileSync(file, "utf8")).toBe(original);
+      if (flavor === "computer-click") expect(s.localStarts()).toBe(0);
+    }
+  });
+  it("forwards computer-use approvals and honors rejection", async () => {
+    for (const accepted of [true, false]) {
+      const questions: string[] = [];
+      const computer = new ComputerExecutor(
+        () => ({
+          file: process.execPath,
+          prefixArgs: [resolve("test/fixtures/cloud-runtime.mjs"), "local", "computer-approval"],
+        }),
+        process.cwd(),
+        async (app, seat) => {
+          questions.push(app + ":" + seat);
+          return accepted;
+        },
+        "Joker",
+      );
+      try {
+        await computer.start();
+        if (accepted)
+          expect((await computer.call({ action: "list_windows" })).content[0]?.text).toBe("FIXTURE_APPROVED");
+        else await expect(computer.call({ action: "list_windows" })).rejects.toThrow("not approved");
+        expect(questions).toEqual(["fixture.exe:Joker"]);
+      } finally {
+        await computer.close();
+      }
+    }
+  });
+  it("routes computer use through the local MCP executor and refuses restricted seats", async () => {
+    const allowed = setup("computer");
+    const run = allowed.adapter.start({
+      seat: { ...allowed.seat, permissionMode: "yolo" },
+      connection: { connection: allowed.connection, env: {} },
+      cwd: allowed.dir,
+      prompt: "List windows",
+      signal: new AbortController().signal,
+    });
+    const response = await run.result;
+    expect(response.failed).toBe(false);
+    expect(response.text).toContain("FIXTURE_WINDOWS");
+    const restricted = setup("computer");
+    const denied = await restricted.adapter.start({
+      seat: restricted.seat,
+      connection: { connection: restricted.connection, env: {} },
+      cwd: restricted.dir,
+      prompt: "List windows",
+      signal: new AbortController().signal,
+    }).result;
+    expect(denied.text).toContain("完全访问权限");
+    expect(restricted.localStarts()).toBe(0);
+  });
   it("keeps legacy local validation and rejects cross-source credentials or shell injection", () => {
     const s = setup();
     expect(checkConnection(s.connection)).toEqual([]);

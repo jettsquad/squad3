@@ -74,6 +74,7 @@ export function createAgentCheck(deps: AgentCheckDeps): AgentCheck {
         // should fail HERE, at 测试, not in the first round.
         reasoningEffort: template.reasoningEffort,
         webAccess: template.webAccess,
+        computerAccess: template.computerAccess,
         hostCustomizations: template.hostCustomizations,
       };
       const result = await adapter.start({

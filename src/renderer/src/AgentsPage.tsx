@@ -60,6 +60,7 @@ interface Draft {
   reasoningEffort: ReasoningEffort | "";
   secretaryCandidate: boolean;
   webAccess: boolean;
+  computerAccess: boolean;
   hostCustomizations: boolean;
   subagents: boolean;
   color: string;
@@ -89,6 +90,7 @@ const blank = (): Draft => ({
   reasoningEffort: "",
   secretaryCandidate: false,
   webAccess: false,
+  computerAccess: false,
   hostCustomizations: false,
   subagents: false,
   color: COLORS[0] ?? "#2e7d6b",
@@ -117,6 +119,7 @@ function draftOf(agent: AgentWire): Draft {
     reasoningEffort: agent.reasoningEffort ?? "",
     secretaryCandidate: agent.secretaryCandidate,
     webAccess: agent.webAccess === true,
+    computerAccess: agent.computerAccess === true,
     hostCustomizations: agent.hostCustomizations === true,
     subagents: agent.subagents === true,
     color: agent.color,
@@ -244,6 +247,7 @@ export function AgentsPage(): JSX.Element {
           backend: draft.backend,
           secretaryCandidate: draft.secretaryCandidate,
           webAccess: draft.webAccess,
+          computerAccess: draft.computerAccess,
           hostCustomizations: draft.hostCustomizations,
           subagents: draft.subagents,
           color: draft.color,
@@ -512,6 +516,23 @@ export function AgentsPage(): JSX.Element {
                 ? t("允许联网（打开 codex 沙箱的出网通道）")
                 : t("允许联网（预先批准 WebFetch / WebSearch）")}
             </label>
+          )}
+          {draft.backend !== "codex" ? null : (
+            <>
+              <label className="check block">
+                <input
+                  type="checkbox"
+                  checked={draft.computerAccess}
+                  onChange={(event) => set({ computerAccess: event.target.checked })}
+                />
+                {t("预先授权云端席位使用本机 Computer Use")}
+              </label>
+              <p className="muted">
+                {t(
+                  "开启后，该云端席位可在任务中查看和操作本机应用，不再逐次询问；需同时选择完全访问权限。保存后会同步到使用此 Agent 的团队。关闭后仍会逐次询问。",
+                )}
+              </p>
+            </>
           )}
           {draft.backend !== "claude-code" ? null : (
             <>

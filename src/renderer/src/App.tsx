@@ -16,6 +16,7 @@ import { Startup } from "./Startup.tsx";
 import { setLanguage, systemLanguage, t } from "./locale.ts";
 import { SettingsPage } from "./SettingsPage.tsx";
 import { TeamView } from "./TeamView.tsx";
+import { Inbox } from "./Inbox.tsx";
 
 type Selection =
   | { readonly kind: "team"; readonly teamId: string; readonly note?: string | undefined }
@@ -26,9 +27,12 @@ type Selection =
   | { readonly kind: "criteria" }
   | { readonly kind: "settings" }
   | { readonly kind: "archive" }
+  | { readonly kind: "inbox" }
   | { readonly kind: "none" };
 
 export function App(): JSX.Element {
+  const [leftOpen, setLeftOpen] = useState(() => localStorage.getItem("squad.sidebar.left") !== "closed");
+  const [rightOpen, setRightOpen] = useState(() => localStorage.getItem("squad.sidebar.right") !== "closed");
   const tick = useTeamChanges(undefined);
   const [teams, setTeams] = useState<readonly TeamSummary[]>([]);
   const [problems, setProblems] = useState<readonly string[]>([]);
@@ -101,7 +105,7 @@ export function App(): JSX.Element {
       lastSession.current.set(currentGroup, currentSession);
   }, [currentGroup, currentSession]);
   const nav = (
-    kind: "agents" | "blocks" | "connections" | "criteria" | "settings" | "archive",
+    kind: "agents" | "blocks" | "connections" | "criteria" | "settings" | "archive" | "inbox",
     label: string,
   ): JSX.Element => (
     <button
@@ -114,9 +118,47 @@ export function App(): JSX.Element {
   );
 
   return (
-    <div className="app" key={lang}>
+    <div className={`app ${leftOpen ? "" : "left-collapsed"}`} key={lang}>
       <Startup teams={teams} ready={!load.busy} />
-      <aside className="sidebar">
+      <div className="sidebar-toolbar">
+        <button
+          type="button"
+          className="sidebar-toggle"
+          aria-label={t(leftOpen ? "收起左侧栏" : "展开左侧栏")}
+          title={t(leftOpen ? "收起左侧栏" : "展开左侧栏")}
+          aria-controls="team-navigation"
+          aria-expanded={leftOpen}
+          onClick={() => {
+            localStorage.setItem("squad.sidebar.left", leftOpen ? "closed" : "open");
+            setLeftOpen(!leftOpen);
+          }}
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <rect x="2.5" y="3.5" width="15" height="13" rx="2" />
+            <path d="M7.5 4v12" />
+          </svg>
+        </button>
+        {current !== undefined && selection.kind === "team" && (
+          <button
+            type="button"
+            className="sidebar-toggle"
+            aria-label={t(rightOpen ? "收起右侧栏" : "展开右侧栏")}
+            title={t(rightOpen ? "收起右侧栏" : "展开右侧栏")}
+            aria-controls="team-details"
+            aria-expanded={rightOpen}
+            onClick={() => {
+              localStorage.setItem("squad.sidebar.right", rightOpen ? "closed" : "open");
+              setRightOpen(!rightOpen);
+            }}
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <rect x="2.5" y="3.5" width="15" height="13" rx="2" />
+              <path d="M12.5 4v12" />
+            </svg>
+          </button>
+        )}
+      </div>
+      <aside id="team-navigation" className="sidebar" hidden={!leftOpen}>
         <div className="brand">Squad</div>
         <div className="label">{t("团队")}</div>
         <div className="team-list">
@@ -211,6 +253,7 @@ export function App(): JSX.Element {
           </button>
         </div>
         {nav("archive", t("🗄 归档"))}
+        {nav("inbox", t("待处理"))}
         <div className="label">{t("库")}</div>
         {nav("agents", t("Agent 库"))}
         {nav("blocks", t("提示词库"))}
@@ -239,6 +282,8 @@ export function App(): JSX.Element {
         </main>
       ) : selection.kind === "agents" ? (
         <AgentsPage />
+      ) : selection.kind === "inbox" ? (
+        <Inbox teams={teams} onOpen={(teamId) => setSelection({ kind: "team", teamId })} />
       ) : selection.kind === "blocks" ? (
         <BlocksPage />
       ) : selection.kind === "connections" ? (
@@ -254,6 +299,7 @@ export function App(): JSX.Element {
           key={current.teamId}
           team={current}
           teams={teams}
+          detailsOpen={rightOpen}
           onSelect={(teamId, note) => setSelection({ kind: "team", teamId, note })}
           arrivalNote={selection.kind === "team" ? selection.note : undefined}
           onDisbanded={() => void refresh().then(() => setSelection({ kind: "none" }))}

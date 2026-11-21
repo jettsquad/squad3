@@ -264,6 +264,17 @@ describe("editing the roster", () => {
     expect(() => table.patchSeat(teamId, first, { connectionId: "nope" })).toThrow(/没有这个连接/);
   });
 
+  it("updates computer authorization only for the selected seat and can revoke it", () => {
+    const { table, teamId } = team();
+    const [first, second] = teamOf(table, teamId).seats;
+    if (first === undefined || second === undefined) throw new Error("missing fixture seats");
+    table.patchSeat(teamId, first.seatId, { computerAccess: true });
+    expect(teamOf(table, teamId).seats[0]?.computerAccess).toBe(true);
+    expect(teamOf(table, teamId).seats[1]?.computerAccess).not.toBe(true);
+    table.patchSeat(teamId, first.seatId, { computerAccess: false });
+    expect(teamOf(table, teamId).seats[0]?.computerAccess).toBe(false);
+  });
+
   it("refuses a connection of another backend", () => {
     const { table, teamId, library } = team();
     library.connections.set("cx", { ...gateway, connectionId: "cx", backend: "codex", displayName: "codex 网关" });

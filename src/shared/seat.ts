@@ -45,6 +45,8 @@ export interface SeatSpec {
   readonly voiceId?: string | undefined;
   /** Let this seat reach the web without stopping to ask. */
   readonly webAccess?: boolean | undefined;
+  /** Preapprove this cloud seat's local computer-use application requests. */
+  readonly computerAccess?: boolean | undefined;
   /** Let this seat's `claude` read the host's own configuration. Off unless set. */
   readonly hostCustomizations?: boolean | undefined;
   /** Let this seat spawn subagents of its own. Off unless set. */

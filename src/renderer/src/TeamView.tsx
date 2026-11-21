@@ -7,6 +7,7 @@ import type { SeatSummary, TeamSummary, TranscriptLine } from "../../shared/wire
 import { call, useAction, useTeamChanges } from "./api.ts";
 import { ContextPanel } from "./ContextPanel.tsx";
 import { AgendaMessage, AgendaPanel, DraftCard } from "./Agenda.tsx";
+import { ArtifactReview } from "./ArtifactReview.tsx";
 import { agendaInText } from "./agenda-text.ts";
 import { defaultVoiceFor } from "../../shared/voices.ts";
 import { Dictate, SpeakButton } from "./Voice.tsx";
@@ -333,6 +334,7 @@ function SessionActions(props: { readonly team: TeamSummary; readonly onClosed: 
 export function TeamView(props: {
   readonly team: TeamSummary;
   readonly teams: readonly TeamSummary[];
+  readonly detailsOpen: boolean;
   /** Switch teams; `note` is shown on arrival (a slash command's answer about the team it switched to). */
   readonly onSelect: (teamId: string, note?: string) => void;
   /** Shown when this view opens: what the command that brought us here said. */
@@ -544,7 +546,7 @@ export function TeamView(props: {
   const interrupted = team.commands.filter((command) => command.state === "interrupted");
 
   return (
-    <div className="team">
+    <div className={`team ${props.detailsOpen ? "" : "details-collapsed"}`}>
       <div className="main">
         <div className="header">
           <h2>
@@ -821,8 +823,9 @@ export function TeamView(props: {
           </div>
         </div>
       </div>
-      <aside className="side">
+      <aside id="team-details" className="side" hidden={!props.detailsOpen}>
         <AgendaPanel team={team} />
+        <ArtifactReview team={team} />
         {designer?.designer === true && <DesignerPanel team={team} />}
         <SeatEditor team={team} onDisbanded={props.onDisbanded} />
         <MaterialsPanel team={team} attached={attachedHeld} onToggle={toggleAttached} />

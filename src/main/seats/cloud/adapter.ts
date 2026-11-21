@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { z } from "zod";
 import {
   closeSync,
   existsSync,
@@ -15,9 +18,11 @@ import { homedir } from "node:os";
 import { rm } from "node:fs/promises";
 import { checkConnection, type SeatConnection } from "../../../shared/connection.ts";
 import type { SeatUsage } from "../../../shared/seat-usage.ts";
+import type { MethodOutput } from "../../../shared/wire.ts";
 import { refusedRun, type ResolvedCommand, type SeatResult, type SeatRun } from "../../seat-runtime/index.ts";
 import type { SeatAdapter, SeatRequest } from "../types.ts";
 import { CloudRpc, type RpcMessage } from "./rpc.ts";
+import { ComputerExecutor, type ComputerApproval } from "./computer.ts";
 
 type CommandResolver = (name: string) => ResolvedCommand;
 interface ThreadReply {
@@ -69,11 +74,44 @@ const IMAGE_TOOL = {
     additionalProperties: false,
   },
 };
+const COMPUTER_TOOL = {
+  type: "function",
+  name: "workstation_computer",
+  description:
+    "Use the local Windows Computer Use interface. First list_windows, then observe a listed window before each click, type_text, press_key or scroll. The observation returns accessibility text and screenshots. Do not use terminal, authentication or security windows.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["list_windows", "observe", "click", "type_text", "press_key", "scroll"] },
+      windowId: { type: "integer" },
+      app: { type: "string" },
+      elementIndex: { type: "integer" },
+      x: { type: "number" },
+      y: { type: "number" },
+      text: { type: "string" },
+      key: { type: "string" },
+      scrollY: { type: "number" },
+      screenshotId: { type: "string" },
+    },
+    required: ["action"],
+    additionalProperties: false,
+  },
+};
 
 /** Stable scope: changing a connection/profile/account revision cannot resume its old thread. */
 export function cloudScope(connection: SeatConnection, cwd: string, seatId: string, scene?: string): string {
+  const { quotaProvider: _quotaProvider, ...profile } = connection.cloud ?? {};
   return createHash("sha256")
-    .update(JSON.stringify([connection.connectionId, connection.cloud, connection.modelId, cwd, seatId, scene]))
+    .update(
+      JSON.stringify([
+        connection.connectionId,
+        connection.cloud === undefined ? undefined : profile,
+        connection.modelId,
+        cwd,
+        seatId,
+        scene,
+      ]),
+    )
     .digest("hex");
 }
 
@@ -90,7 +128,7 @@ export function cloudResume(id: string | undefined, scope: string): string | und
 }
 
 /** Strict SSH host verification. The only remote command is a validated executable and user. */
-export function cloudSshArgs(connection: SeatConnection): readonly string[] {
+export function cloudSshArgs(connection: SeatConnection, operation: "agent" | "quota" = "agent"): readonly string[] {
   const problems = checkConnection(connection);
   if (problems.length > 0) throw new Error(problems.map((p) => p.detail).join("\n"));
   const c = connection.cloud;
@@ -116,8 +154,108 @@ export function cloudSshArgs(connection: SeatConnection): readonly string[] {
     "-o",
     "ServerAliveCountMax=2",
     `${c.user}@${c.host}`,
-    `exec runuser -u ${c.runAs} -- timeout 1800 ${c.executable} app-server --stdio`,
+    operation === "agent"
+      ? `exec runuser -u ${c.runAs} -- timeout 1800 ${c.executable} app-server --stdio`
+      : `exec runuser -u ${c.runAs} -- timeout 15 ${c.executable} squad-quota`,
   ];
+}
+
+const quotaWindows = z
+  .array(
+    z.object({
+      label: z.string().min(1).max(120),
+      remainingPercent: z.number().min(0).max(100),
+      resetsAt: z.number().positive().optional(),
+    }),
+  )
+  .min(1)
+  .max(20);
+
+function sshEnvironment(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { HOME: homedir() };
+  for (const key of [
+    "PATH",
+    "SystemRoot",
+    "WINDIR",
+    "SystemDrive",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "USERNAME",
+    "USERDOMAIN",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "TEMP",
+    "TMP",
+    "COMSPEC",
+    "ProgramData",
+  ]) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  return env;
+}
+
+export async function readCloudQuota(
+  connection: SeatConnection,
+  resolveCommand: CommandResolver,
+): Promise<MethodOutput<"connections.quota">> {
+  const provider = connection.cloud?.quotaProvider;
+  if (connection.source !== "octopus" || provider === undefined) throw new Error("请先设置云端额度来源。");
+  const ssh = resolveCommand("ssh");
+  if (provider === "minimax") {
+    try {
+      const { stdout } = await promisify(execFile)(
+        ssh.file,
+        [...ssh.prefixArgs, ...cloudSshArgs(connection, "quota")],
+        {
+          windowsHide: true,
+          timeout: 20000,
+          maxBuffer: 32768,
+          env: { ...sshEnvironment(), ...ssh.env },
+        },
+      );
+      return { checkedAt: Date.now(), windows: quotaWindows.parse(JSON.parse(stdout)) };
+    } catch {
+      throw new Error("无法查询 MiniMax 订阅额度。请检查云端额度查询程序和订阅 Key。");
+    }
+  }
+  const rpc = new CloudRpc(ssh, cloudSshArgs(connection), homedir(), sshEnvironment());
+  try {
+    await rpc.initialize(15000);
+    const window = z
+      .object({
+        usedPercent: z.number().min(0),
+        windowDurationMins: z.number().positive().nullish(),
+        resetsAt: z.number().positive().nullish(),
+      })
+      .nullish();
+    const bucket = z.object({ limitName: z.string().nullish(), primary: window, secondary: window });
+    const data = z
+      .object({
+        rateLimits: bucket,
+        rateLimitsByLimitId: z.record(z.string(), bucket).nullish(),
+      })
+      .parse(await rpc.request("account/rateLimits/read", {}, 15000));
+    const buckets = Object.entries(data.rateLimitsByLimitId ?? {});
+    const windows = (buckets.length ? buckets : ([["Codex", data.rateLimits]] as const)).flatMap(([id, entry]) =>
+      [entry.primary, entry.secondary].flatMap((value, index) =>
+        value == null
+          ? []
+          : [
+              {
+                label: `${entry.limitName || id} · ${value.windowDurationMins ?? (index === 0 ? "primary" : "secondary")}${value.windowDurationMins == null ? "" : " min"}`,
+                remainingPercent: Math.max(0, 100 - value.usedPercent),
+                resetsAt: value.resetsAt == null ? undefined : value.resetsAt * 1000,
+              },
+            ],
+      ),
+    );
+    return { checkedAt: Date.now(), windows: quotaWindows.parse(windows) };
+  } catch {
+    throw new Error("无法查询 Codex 订阅额度。请检查云端 ChatGPT 登录和网络。");
+  } finally {
+    await rpc.close();
+  }
 }
 
 function textResult(text: string, success: boolean): ToolReply {
@@ -128,6 +266,8 @@ function textResult(text: string, success: boolean): ToolReply {
 export function createCloudAdapter(options: {
   readonly stateDir: string;
   readonly resolve: CommandResolver;
+  readonly active?: Set<string>;
+  readonly approveComputer?: ComputerApproval | undefined;
 }): SeatAdapter {
   return {
     backend: "codex",
@@ -172,11 +312,17 @@ function runCloud(
   connection: SeatConnection,
   scope: string,
   resumed: string | undefined,
-  options: { readonly stateDir: string; readonly resolve: CommandResolver },
+  options: {
+    readonly stateDir: string;
+    readonly resolve: CommandResolver;
+    readonly active?: Set<string>;
+    readonly approveComputer?: ComputerApproval | undefined;
+  },
 ): SeatRun {
   const started = Date.now();
   let cloud: CloudRpc | undefined;
   let local: CloudRpc | undefined;
+  let computer: ComputerExecutor | undefined;
   let localReady: Promise<CloudRpc> | undefined;
   let cancelled = false;
   let ended = false;
@@ -232,6 +378,7 @@ function runCloud(
     cancelled = true;
     if (inFlight) uncertain = true;
     local?.close();
+    void computer?.close();
     if (threadId !== undefined && turnId !== undefined)
       void cloud?.request("turn/interrupt", { threadId, turnId }, 3000).catch(() => undefined);
     else void cloud?.close();
@@ -269,6 +416,110 @@ function runCloud(
     if (cancelled || ended || uncertain) return textResult("本地执行已停止或需要核对，不允许继续。", false);
     if (call.threadId !== threadId || call.turnId !== turnId) return textResult("工具调用不属于当前回合。", false);
     if (++toolCount > 40) return textResult("本轮超过 40 次工具调用上限。", false);
+    if (call.tool === "workstation_computer") {
+      if ((request.seat.permissionMode ?? "workspace") !== "yolo")
+        return textResult("Computer Use 需要席位的完全访问权限；当前权限未改变。", false);
+      if (typeof call.arguments !== "object" || call.arguments === null || Array.isArray(call.arguments))
+        return textResult("Computer Use 参数无效。", false);
+      if (!/^[\w-]{1,200}$/.test(call.callId)) return textResult("工具调用编号无效。", false);
+      const input = call.arguments as Parameters<ComputerExecutor["call"]>[0];
+      if (
+        input.action !== "list_windows" &&
+        (!Number.isSafeInteger(input.windowId) || typeof input.app !== "string" || input.app.length > 500)
+      )
+        return textResult("请先列出窗口，并同时提供返回的 windowId 和 app。没有执行任何操作。", false);
+      const digest = createHash("sha256").update(JSON.stringify(input)).digest("hex");
+      const previous = actions.get(call.callId);
+      if (previous !== undefined)
+        return previous.digest === digest ? previous.result : textResult("调用参数不一致。", false);
+      const result = (async (): Promise<ToolReply> => {
+        if (inFlight) return textResult("上一个本地工具仍在执行。", false);
+        const readOnly = input.action === "list_windows" || input.action === "observe";
+        if (!readOnly) mkdirSync(join(options.stateDir, "cloud-pending"), { recursive: true });
+        if (!readOnly && !lockHeld) {
+          try {
+            const fd = openSync(lockFile, "wx", 0o600);
+            closeSync(fd);
+          } catch {
+            return textResult(
+              `该项目有未结算的云端工具记录，请在 Squad 左侧「待处理」核对后再操作：${lockFile}。`,
+              false,
+            );
+          }
+          lockHeld = true;
+          options.active?.add(lockFile);
+        }
+        inFlight = true;
+        try {
+          if (!readOnly)
+            writeFileSync(
+              lockFile,
+              JSON.stringify({
+                at: Date.now(),
+                project: request.cwd,
+                scope,
+                callId: call.callId,
+                digest,
+                state: "pending",
+              }),
+              { mode: 0o600 },
+            );
+          if (computer === undefined) {
+            computer = new ComputerExecutor(
+              options.resolve,
+              request.cwd,
+              request.seat.computerAccess === true ? async () => true : options.approveComputer,
+              request.seat.displayName,
+            );
+            await computer.start();
+          }
+          const response = await computer.call(input);
+          const items: ToolReply["contentItems"][number][] = [];
+          for (const item of response.content) {
+            if (item.type === "text" && typeof item.text === "string")
+              items.push({ type: "inputText", text: item.text.slice(0, 50000) });
+            if (
+              item.type === "image" &&
+              typeof item.data === "string" &&
+              /^image\/(png|jpeg|webp)$/.test(item.mimeType ?? "")
+            )
+              items.push({ type: "inputImage", imageUrl: `data:${item.mimeType};base64,${item.data}` });
+          }
+          if (!readOnly)
+            writeFileSync(
+              lockFile,
+              JSON.stringify({
+                at: Date.now(),
+                project: request.cwd,
+                scope,
+                callId: call.callId,
+                digest,
+                state: "completedAwaitingCloud",
+                exitCode: 0,
+                stdout: "Computer Use 操作已返回。",
+              }),
+              { mode: 0o600 },
+            );
+          return {
+            success: true,
+            contentItems: items.length > 0 ? items : [{ type: "inputText", text: "操作完成。" }],
+          };
+        } catch (e) {
+          if (/Computer Use was not approved/i.test(errorText(e))) {
+            return textResult(`本机 Computer Use 未授权此窗口，未执行操作：${errorText(e)}`, false);
+          }
+          if (input.action === "list_windows" || input.action === "observe") {
+            return textResult(`Computer Use 读取失败：${errorText(e)}`, false);
+          }
+          uncertain = true;
+          return textResult(`Computer Use 调用未确认，请核对本地状态：${errorText(e)}`, false);
+        } finally {
+          inFlight = false;
+        }
+      })();
+      actions.set(call.callId, { digest, result });
+      return result;
+    }
     if (call.threadId === threadId && call.tool === "workstation_image") {
       try {
         const p = call.arguments as Record<string, unknown>;
@@ -334,18 +585,36 @@ function runCloud(
           return textResult(`该项目有未结算的云端工具记录，先核对 ${lockFile}，不要重试命令。`, false);
         }
         try {
-          writeFileSync(fd, JSON.stringify({ at: Date.now(), scope, callId: call.callId, digest, state: "pending" }));
+          writeFileSync(
+            fd,
+            JSON.stringify({
+              at: Date.now(),
+              project: request.cwd,
+              scope,
+              callId: call.callId,
+              digest,
+              state: "pending",
+            }),
+          );
         } finally {
           closeSync(fd);
         }
         lockHeld = true;
+        options.active?.add(lockFile);
       }
       inFlight = true;
       // Update the retained guard for every action, not only the first one in a turn.
       try {
         writeFileSync(
           lockFile,
-          JSON.stringify({ at: Date.now(), scope, callId: call.callId, digest, state: "pending" }),
+          JSON.stringify({
+            at: Date.now(),
+            project: request.cwd,
+            scope,
+            callId: call.callId,
+            digest,
+            state: "pending",
+          }),
           { mode: 0o600 },
         );
       } catch (e) {
@@ -384,6 +653,7 @@ function runCloud(
           lockFile,
           JSON.stringify({
             at: Date.now(),
+            project: request.cwd,
             scope,
             callId: call.callId,
             digest,
@@ -430,27 +700,7 @@ function runCloud(
       }
       if (!existsSync(connection.cloud?.identityFile ?? "") || !existsSync(connection.cloud?.knownHostsFile ?? ""))
         throw new Error("SSH 密钥或主机记录文件不存在；请编辑云端连接。");
-      const transportEnv: NodeJS.ProcessEnv = { HOME: homedir() };
-      for (const key of [
-        "PATH",
-        "SystemRoot",
-        "WINDIR",
-        "SystemDrive",
-        "USERPROFILE",
-        "HOMEDRIVE",
-        "HOMEPATH",
-        "USERNAME",
-        "USERDOMAIN",
-        "APPDATA",
-        "LOCALAPPDATA",
-        "TEMP",
-        "TMP",
-        "COMSPEC",
-        "ProgramData",
-      ]) {
-        if (process.env[key] !== undefined) transportEnv[key] = process.env[key];
-      }
-      cloud = new CloudRpc(options.resolve("ssh"), cloudSshArgs(connection), request.cwd, transportEnv);
+      cloud = new CloudRpc(options.resolve("ssh"), cloudSshArgs(connection), request.cwd, sshEnvironment());
       const done = new Promise<void>((ok, bad) => {
         settleTurn = ok;
         rejectTurn = bad;
@@ -516,8 +766,8 @@ function runCloud(
         approvalPolicy: "on-request",
         sandbox: "read-only",
         environments: [],
-        dynamicTools: [SHELL_TOOL, IMAGE_TOOL],
-        developerInstructions: `You are a Squad 3 cloud seat. The workstation is ${process.platform}; its project is ${request.cwd}. Only workstation_shell performs business I/O. Do not access cloud business files or native tools. The host owns orchestration; do not contact other seats. Respect local refusals and never retry unknown effects.`,
+        dynamicTools: [SHELL_TOOL, IMAGE_TOOL, COMPUTER_TOOL],
+        developerInstructions: `You are a Squad 3 cloud seat. The workstation is ${process.platform}; its project is ${request.cwd}. Use workstation_computer for desktop and browser UI, not shell or browser debugging. List windows, then observe before each action. Do not automate terminal, authentication or security windows. Do not access cloud business files or native tools. The host owns orchestration; respect local refusals and never retry unknown effects.`,
         ...(connection.modelId === undefined || connection.modelId === "" ? {} : { model: connection.modelId }),
       };
       let opened: ThreadReply;
@@ -569,7 +819,7 @@ function runCloud(
       ended = true;
       clearTimeout(deadline);
       request.signal?.removeEventListener("abort", stop);
-      await Promise.all([cloud?.close(), local?.close()]);
+      await Promise.all([cloud?.close(), local?.close(), computer?.close()]);
       if (lockHeld && !uncertain && failure === undefined && !cancelled) {
         try {
           rmSync(lockFile, { force: true });
@@ -577,6 +827,7 @@ function runCloud(
           /* Leave the guard in place if cleanup fails. */
         }
       }
+      if (lockHeld) options.active?.delete(lockFile);
       if (localHome !== undefined && !uncertain) {
         try {
           await rm(localHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

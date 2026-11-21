@@ -189,6 +189,33 @@ export function SeatEditor(props: { readonly team: TeamSummary; readonly onDisba
                     )}
                 </select>
               </label>
+              {seat.backend === "codex" &&
+                connections.find((c) => c.connectionId === seat.connectionId)?.source === "octopus" && (
+                  <>
+                    <label className="check block">
+                      <input
+                        type="checkbox"
+                        checked={seat.computerAccess === true}
+                        disabled={busy}
+                        onChange={(event) =>
+                          void action.run(() =>
+                            call("seats.patch", {
+                              teamId: team.teamId,
+                              seatId: seat.seatId,
+                              computerAccess: event.target.checked,
+                            }),
+                          )
+                        }
+                      />
+                      {t("预先授权云端席位使用本机 Computer Use")}
+                    </label>
+                    <p className="muted">
+                      {t(
+                        "开启后，该席位可在任务中查看和操作本机应用，不再逐次询问；需同时选择完全访问权限。仅影响此团队。关闭后仍会逐次询问。",
+                      )}
+                    </p>
+                  </>
+                )}
               <CapsEditor
                 key={JSON.stringify(seat.caps ?? {})}
                 seat={seat}

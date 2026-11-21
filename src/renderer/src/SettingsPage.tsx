@@ -395,6 +395,13 @@ export function SettingsPage(): JSX.Element {
             <p className="muted">
               {t("Squad {version} · 数据目录 {dir}", { version: info.version, dir: info.dataDir })}
             </p>
+            <button
+              type="button"
+              disabled={action.busy}
+              onClick={() => void action.run(() => call("app.data.move", {}))}
+            >
+              {t("更改数据目录")}
+            </button>
           </>
         )}
       </div>

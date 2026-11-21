@@ -108,12 +108,57 @@ textarea {
 .app {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: 42px minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
 }
 
+.app.left-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+.sidebar-toolbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 4px;
+  color: var(--text-2);
+  border-color: transparent;
+}
+
+.sidebar-toggle svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.sidebar-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.sidebar[hidden],
+.side[hidden] {
+  display: none;
+}
+
 .sidebar {
+  grid-column: 1;
+  grid-row: 2;
   border-right: 1px solid var(--border);
   background: var(--panel);
   display: flex;
@@ -122,6 +167,13 @@ textarea {
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+.app > .main,
+.app > .team {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
 }
 
 /* A long team name is cut with … (the whole name is its tooltip), never spilling into the page. */
@@ -378,6 +430,10 @@ textarea {
   min-height: 0;
   height: 100%;
   overflow: hidden;
+}
+
+.team.details-collapsed {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .side {
@@ -1109,4 +1165,11 @@ code {
   ::-webkit-scrollbar-track {
     background: transparent;
   }
+}
+.review-text {
+  max-height: 20rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
 }
