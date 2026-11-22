@@ -416,6 +416,7 @@ export const methods = {
   "app.data.move": { input: z.object({}).strict(), output: z.object({}) },
   /** Check the configured release feed for a newer installed app version. */
   "app.update.check": { input: z.object({}).strict(), output: z.object({}) },
+  "app.update.downloadMac": { input: z.object({}).strict(), output: z.object({}) },
   /** Install an already downloaded update and restart. */
   "app.update.install": { input: z.object({}).strict(), output: z.object({}) },
   /** Choose a local release package and stage it in the normal updater, without Internet transfer. */
@@ -1004,7 +1005,8 @@ export interface PushEvents {
   readonly "team.open": { readonly teamId: string };
   /** Progress of the desktop app's release update. */
   readonly "app.update": {
-    readonly state: "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error" | "unsupported";
+    readonly state:
+      "checking" | "available" | "manual" | "not-available" | "downloading" | "downloaded" | "error" | "unsupported";
     readonly version?: string;
     readonly percent?: number;
     readonly message?: string;

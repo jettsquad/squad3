@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { basename, dirname, join } from "node:path";
+export { checkMacRelease } from "./releases.ts";
 
 async function digest(file: string): Promise<string> {
   const hash = createHash("sha512");

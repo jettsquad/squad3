@@ -91,5 +91,7 @@ jobs:
           note='Windows x64 支持应用内更新。macOS 请按芯片选择 Apple 芯片（arm64）或 Intel（x64）的 DMG 手动更新。'
           if [[ "$GITHUB_REF_NAME" == "v3.0.0-dev.8" ]]; then
             note=$'首次启动自动开通云端 MiniMax 的 10 天试用。可申请 1 个月或 1 年使用授权，由后台审核。\n\n'"$note"
+          elif [[ "$GITHUB_REF_NAME" == "v3.0.0-dev.9" ]]; then
+            note=$'修复 macOS 的「检查更新」。新版能检测较新的兼容版本并提供对应 DMG 的下载按钮。从旧版升级到此版需先手动安装。\n\n'"$note"
           fi
           gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes --notes "$note" "${flags[@]}"

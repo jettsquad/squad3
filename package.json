@@ -1,7 +1,7 @@
 {
   "name": "squad",
   "productName": "Squad",
-  "version": "3.0.0-dev.8",
+  "version": "3.0.0-dev.9",
   "private": true,
   "description": "人主持的多 agent 圆桌：Squad 自己当宿主，Claude Code、Codex、dsh 都是席位。",
   "type": "module",
@@ -31,6 +31,7 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "semver": "^7.8.6",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -38,6 +39,7 @@
     "@types/node": "^24.0.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/semver": "^7.8.0",
     "@vitejs/plugin-react": "^6.1.2",
     "electron": "^44.9.1",
     "electron-builder": "^26.15.3",

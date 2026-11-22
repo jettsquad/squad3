@@ -6,6 +6,9 @@
  * Chinese — see `t` in locale.ts.
  */
 export const EN: Readonly<Record<string, string>> = {
+  "发现新版本 {version}，下载 DMG 后可手动安装。": "Version {version} is available. Download the DMG to install it.",
+  "下载 macOS 更新": "Download macOS update",
+  "检查后可下载适合此 Mac 的安装包。": "Check for and download an installer for this Mac.",
   "云端 Agent": "Cloud Agent",
   "云端 MiniMax 首次开通后可试用 10 天。": "Try Cloud MiniMax for 10 days after first activation.",
   "重试开通云端 Agent": "Retry Cloud Agent setup",

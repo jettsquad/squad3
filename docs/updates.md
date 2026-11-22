@@ -11,4 +11,4 @@
 
 发布时上传 exe、exe.blockmap、latest.yml；预发布另附相同元数据的 dev.yml，使用与 package.json 一致的 v 标签。安装器应对应发布标签的源码提交；不要用不同构建覆盖已经发布的同名附件。Windows-only 发布只声明 Windows 已验证，不附带旧版 macOS 包。
 
-跨平台预发布同时提供 Apple 芯片和 Intel Mac 的 DMG，供手动安装。当前 Mac 构建没有 Developer ID 签名配置，发布流程不生成 macOS 自动更新。GitHub Actions 仓库变量 `SQUAD_DEVICE_GATEWAY` 用于在安装包内配置默认云端入口，标签发布前会核对打包结果。
+跨平台预发布同时提供 Apple 芯片和 Intel Mac 的 DMG。macOS 在设置页点「检查更新」，Squad 会找到适用于当前芯片的较新版本，再提供 DMG 下载按钮。当前 Mac 构建没有 Developer ID 签名配置，下载后手动安装。GitHub Actions 仓库变量 `SQUAD_DEVICE_GATEWAY` 用于在安装包内配置默认云端入口，标签发布前会核对打包结果。

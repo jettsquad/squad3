@@ -30,7 +30,7 @@ import { TRAY_ICON_PNG_BASE64 } from "./tray-icon.ts";
 import { EVENT_CHANNEL, INVOKE_CHANNEL } from "../shared/wire.ts";
 import { compose } from "./compose.ts";
 import { createDispatcher } from "./ipc/index.ts";
-import { prepareLocalUpdate, type LocalUpdateFeed } from "./updates/index.ts";
+import { checkMacRelease, prepareLocalUpdate, type LocalUpdateFeed } from "./updates/index.ts";
 import { homedir } from "node:os";
 import { activateDataDirectory, scheduleDataMove } from "./data-directory.ts";
 
@@ -39,9 +39,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 let updater: AppUpdater | undefined;
 let localUpdateFeed: LocalUpdateFeed | undefined;
 let updateBusy = false;
+let macUpdateUrl: string | undefined;
 
 function pushUpdate(data: {
-  readonly state: "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error";
+  readonly state: "checking" | "available" | "manual" | "not-available" | "downloading" | "downloaded" | "error";
   readonly version?: string;
   readonly percent?: number;
   readonly message?: string;
@@ -348,7 +349,7 @@ void app.whenReady().then(() => {
       if (window !== undefined && !window.isDestroyed()) window.webContents.send(EVENT_CHANNEL, event, data);
     },
     checkForUpdates: async () => {
-      if (!app.isPackaged || process.platform !== "win32") {
+      if (!app.isPackaged || (process.platform !== "win32" && process.platform !== "darwin")) {
         window?.webContents.send(EVENT_CHANNEL, "app.update", {
           state: "unsupported",
           message: !app.isPackaged ? "开发版不能自助更新，请使用已安装的版本。" : "当前版本暂不支持应用内更新。",
@@ -356,12 +357,32 @@ void app.whenReady().then(() => {
         return;
       }
       if (updateBusy) throw new Error("更新正在处理中，请等待完成。");
+      if (process.platform === "darwin") {
+        macUpdateUrl = undefined;
+        pushUpdate({ state: "checking" });
+        try {
+          const version = app.getVersion();
+          const arch = process.arch === "arm64" || app.runningUnderARM64Translation ? "arm64" : "x64";
+          const found = await checkMacRelease(version, arch);
+          macUpdateUrl = found?.url;
+          pushUpdate(
+            found === undefined ? { state: "not-available", version } : { state: "manual", version: found.version },
+          );
+        } catch (error) {
+          pushUpdate({ state: "error", message: error instanceof Error ? error.message : String(error) });
+        }
+        return;
+      }
       if (localUpdateFeed !== undefined) {
         await localUpdateFeed.close();
         localUpdateFeed = undefined;
         getUpdater().updateConfigPath = join(process.resourcesPath, "app-update.yml");
       }
       await getUpdater().checkForUpdates();
+    },
+    downloadMacUpdate: async () => {
+      if (process.platform !== "darwin" || macUpdateUrl === undefined) throw new Error("请先检查 macOS 更新。");
+      await shell.openExternal(macUpdateUrl);
     },
     prepareLocalUpdate: async () => {
       if (!app.isPackaged || process.platform !== "win32") throw new Error("请在已安装的 Windows 版中使用本地更新。");

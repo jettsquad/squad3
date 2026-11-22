@@ -83,6 +83,6 @@ it("rejects stale artifact feedback and routes a valid batch to exactly the sele
     expect(second?.seatId).not.toBe(first!.seatId);
   } finally {
     await app.table.stopAll();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

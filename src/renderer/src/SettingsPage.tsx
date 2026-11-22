@@ -20,7 +20,15 @@ import type { ConnectionViewWire } from "../../shared/wire.ts";
 
 interface UpdateStatus {
   readonly state:
-    "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error" | "unsupported";
+    | "idle"
+    | "checking"
+    | "available"
+    | "manual"
+    | "not-available"
+    | "downloading"
+    | "downloaded"
+    | "error"
+    | "unsupported";
   readonly version?: string;
   readonly percent?: number;
   readonly message?: string;
@@ -34,7 +42,7 @@ export function SettingsPage(): JSX.Element {
   const [dsh, setDsh] = useState("");
   const [folder, setFolder] = useState("");
   const [model, setModel] = useState("");
-  const [info, setInfo] = useState<{ version: string; dataDir: string } | undefined>(undefined);
+  const [info, setInfo] = useState<{ version: string; dataDir: string; platform: string } | undefined>(undefined);
   const [update, setUpdate] = useState<UpdateStatus>({ state: "idle" });
   const action = useAction();
 
@@ -79,6 +87,8 @@ export function SettingsPage(): JSX.Element {
         return t("正在检查更新…");
       case "available":
         return t("发现新版本 {version}，准备下载…", { version: update.version ?? "" });
+      case "manual":
+        return t("发现新版本 {version}，下载 DMG 后可手动安装。", { version: update.version ?? "" });
       case "not-available":
         return t("当前已是最新版本（{version}）。", { version: update.version ?? "" });
       case "downloading":
@@ -347,17 +357,19 @@ export function SettingsPage(): JSX.Element {
           <>
             <div className="section-title">{t("软件更新")}</div>
             <div className="row-gap">
-              <button
-                type="button"
-                disabled={["checking", "available", "downloading"].includes(update.state)}
-                onClick={() => {
-                  void call("app.update.local", {}).catch((error: unknown) =>
-                    setUpdate({ state: "error", message: error instanceof Error ? error.message : String(error) }),
-                  );
-                }}
-              >
-                {t("从本地安装更新")}
-              </button>
+              {info.platform === "win32" && (
+                <button
+                  type="button"
+                  disabled={["checking", "available", "downloading"].includes(update.state)}
+                  onClick={() => {
+                    void call("app.update.local", {}).catch((error: unknown) =>
+                      setUpdate({ state: "error", message: error instanceof Error ? error.message : String(error) }),
+                    );
+                  }}
+                >
+                  {t("从本地安装更新")}
+                </button>
+              )}
               {update.state === "downloaded" ? (
                 <button
                   type="button"
@@ -382,10 +394,24 @@ export function SettingsPage(): JSX.Element {
                     : t("检查更新")}
                 </button>
               )}
+              {update.state === "manual" && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void call("app.update.downloadMac", {}).catch((error: unknown) =>
+                      setUpdate({ state: "error", message: error instanceof Error ? error.message : String(error) }),
+                    )
+                  }
+                >
+                  {t("下载 macOS 更新")}
+                </button>
+              )}
               <span className="muted">{updateMessage()}</span>
             </div>
             <p className="muted">
-              {t("可在线检查，也可选择本机已有的更新包；本地包校验后直接用于安装，不上传或从互联网重下。")}
+              {info.platform === "darwin"
+                ? t("检查后可下载适合此 Mac 的安装包。")
+                : t("可在线检查，也可选择本机已有的更新包；本地包校验后直接用于安装，不上传或从互联网重下。")}
             </p>
 
             <div className="section-title">{t("从 Squad 2.x 导入")}</div>

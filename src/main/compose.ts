@@ -123,6 +123,7 @@ export interface AppEnvironment {
   ) => void;
   /** App updater actions, supplied by Electron only in the desktop build. */
   readonly checkForUpdates?: (() => Promise<void>) | undefined;
+  readonly downloadMacUpdate?: (() => Promise<void>) | undefined;
   readonly installUpdate?: (() => void) | undefined;
   readonly prepareLocalUpdate?: (() => Promise<void>) | undefined;
   /**
@@ -405,6 +406,11 @@ export function compose(env: AppEnvironment): Composed {
     "app.update.install": async () => {
       if (env.installUpdate === undefined) throw new Error("当前环境不支持软件更新。");
       env.installUpdate();
+      return {};
+    },
+    "app.update.downloadMac": async () => {
+      if (env.downloadMacUpdate === undefined) throw new Error("当前环境不支持手动下载更新。");
+      await env.downloadMacUpdate();
       return {};
     },
     "app.update.local": async () => {
