@@ -1,11 +1,33 @@
 // Protocol double only. Never executes a supplied command or uses a network connection.
 import readline from "node:readline";
+import { createContext, runInContext } from "node:vm";
 const role = process.argv[2];
 const flavor = process.argv[3] || "chat";
 const send = (m) => process.stdout.write(JSON.stringify(m) + "\n");
 let thread = "test-cloud-thread";
 let turn = 0;
 let approvalCall;
+let counter = 0;
+let written = "";
+const fixtureWindow = { id: 123, app: "fixture.exe", title: "Fixture" };
+const replContext =
+  flavor === "computer-repl-scope"
+    ? createContext({
+        sky: {
+          list_windows: async () => [fixtureWindow, { id: 124, app: "other.exe", title: "Other" }],
+          get_window_state: async (input) => ({
+            window: input.window,
+            accessibility: { tree: `Count: ${counter}` },
+            screenshots: [{ id: "screenshot-0", url: "fixture", width: 100, height: 100 }],
+          }),
+          click: async ({ screenshotId, x, y }) => {
+            if (screenshotId !== "screenshot-0" || x !== 10 || y !== 10) throw Error("Wrong screenshot or coordinates");
+            counter++;
+          },
+        },
+        nodeRepl: { write: (value) => (written = value) },
+      })
+    : undefined;
 function complete(text) {
   send({ method: "item/agentMessage/delta", params: { threadId: thread, delta: text } });
   send({ method: "turn/completed", params: { threadId: thread, turn: { status: "completed" } } });
@@ -40,7 +62,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   else if (m.method === "thread/start" || m.method === "thread/resume") {
     if (flavor === "missing" && m.method === "thread/resume")
       send({ id: m.id, error: { code: -32600, message: "thread not found" } });
-    else send({ id: m.id, result: { thread: { id: thread } } });
+    else send({ id: m.id, result: { thread: { id: thread }, approvalPolicy: m.params?.approvalPolicy } });
   } else if (m.method === "turn/start") {
     send({ id: m.id, result: { turn: { id: "turn-" + ++turn } } });
     send({ method: "turn/started", params: { threadId: thread, turn: { id: "turn-" + turn } } });
@@ -79,7 +101,21 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       });
     else complete("REMOTE_ONLY");
   } else if (m.method === "mcpServer/tool/call" && role === "local") {
-    if (flavor === "computer-approval" && m.params.arguments.code.includes("list_windows")) {
+    const code = m.params.arguments.code;
+    if (replContext) {
+      written = "";
+      // Model the REPL warning for a declaration at cell scope. Evaluate only the
+      // Windows snippets produced by the regression test's ComputerExecutor.
+      if (code.startsWith("const w =")) {
+        send({ id: m.id, result: { content: [{ type: "text", text: "Unexpected top-level declaration" }] } });
+      } else {
+        const evaluated = runInContext(`(async () => { ${code} })()`, replContext);
+        void evaluated.then(
+          () => send({ id: m.id, result: { content: [{ type: "text", text: written }] } }),
+          (e) => send({ id: m.id, result: { isError: true, content: [{ type: "text", text: e.message }] } }),
+        );
+      }
+    } else if (flavor === "computer-approval" && code.includes("list_windows")) {
       approvalCall = m.id;
       send({
         id: "approval-1",

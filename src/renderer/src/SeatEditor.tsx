@@ -3,10 +3,10 @@
  *
  * 移植自 Squad 2.x packages/console/src/client/{seats,caps}.tsx @ 8dcb903 与
  * team-view.tsx 里的改名、解散（3 叫归档）、重新关联。
- * 改动：连接下拉只列这个席位后端的连接（2.x 列全部，选错了由服务端拒）——同 Agent 库的做法。
+ * 连接属于推理来源，兼容性按席位的本机 Harness 判断。
  */
 import { useState, type JSX } from "react";
-import { meaningfulCaps, type AuthMode } from "../../shared/index.ts";
+import { connectionCompatibility, meaningfulCaps, type AuthMode } from "../../shared/index.ts";
 import type { ConnectionViewWire, SeatSummary, TeamSummary } from "../../shared/wire.ts";
 import { capsOf } from "./AgentsPage.tsx";
 import { call, useAction } from "./api.ts";
@@ -29,7 +29,10 @@ function connectionLabel(seat: SeatSummary, connections: readonly ConnectionView
   const connection = connections.find((c) => c.connectionId === seat.connectionId);
   if (connection === undefined) return t("⚠️ 连接已删除");
   const model = connection.modelId === undefined ? "" : ` · ${connection.modelId}`;
-  const key = connection.authMode === "api-key" && !connection.credentialConfigured ? ` · ⚠️ ${t("密钥未配置")}` : "";
+  const key =
+    connection.source !== "octopus" && connection.authMode === "api-key" && !connection.credentialConfigured
+      ? ` · ⚠️ ${t("密钥未配置")}`
+      : "";
   return `${connection.displayName}${model}${key}`;
 }
 
@@ -161,7 +164,7 @@ export function SeatEditor(props: { readonly team: TeamSummary; readonly onDisba
           {expanded === seat.seatId && (
             <div className="seat-body">
               <label className="field">
-                <span>{t("连接")}</span>
+                <span>{t("推理连接")}</span>
                 <select
                   value={seat.connectionId ?? ""}
                   onChange={(event) =>
@@ -175,14 +178,21 @@ export function SeatEditor(props: { readonly team: TeamSummary; readonly onDisba
                   }
                 >
                   <option value="">{t("本机登录")}</option>
-                  {connections
-                    .filter((connection) => connection.backend === seat.backend)
-                    .map((connection) => (
-                      <option key={connection.connectionId} value={connection.connectionId}>
+                  {connections.map((connection) => {
+                    const problem = connectionCompatibility(seat.backend, connection);
+                    return (
+                      <option
+                        key={connection.connectionId}
+                        value={connection.connectionId}
+                        disabled={problem !== undefined}
+                        title={problem}
+                      >
                         {connection.displayName}
                         {connection.modelId === undefined ? "" : ` · ${connection.modelId}`}
+                        {problem === undefined ? "" : ` · ${t("与此 Harness 不兼容")}`}
                       </option>
-                    ))}
+                    );
+                  })}
                   {seat.connectionId !== undefined &&
                     !connections.some((connection) => connection.connectionId === seat.connectionId) && (
                       <option value={seat.connectionId}>{t("⚠️ 已删除的连接")}</option>

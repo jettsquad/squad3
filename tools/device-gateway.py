@@ -575,9 +575,21 @@ def bridge(child, key_id):
                         check_access()
                         bound = True
                         opening = request_id
-                        config = {"approvalPolicy": "on-request", "sandbox": "read-only", "environments": [],
-                                  "dynamicTools": params.get("dynamicTools", []),
-                                  "developerInstructions": params.get("developerInstructions", "")}
+                        config = {
+                            "approvalPolicy": "never",
+                            "sandbox": "read-only",
+                            "config": {
+                                "features": {"shell_tool": False, "hooks": False, "plugins": False, "apps": False,
+                                             "multi_agent": False, "multi_agent_v2": False, "view_image": False},
+                                "web_search": "disabled",
+                                "mcp_servers": {},
+                            },
+                            "developerInstructions": (
+                                "You are a reasoning agent. Delegate all tool operations to Squad's local Harness "
+                                "through its workstation functions. Do not use native cloud tools.\n"
+                                + params.get("developerInstructions", "")
+                            ),
+                        }
                         if method == "thread/resume":
                             thread = params.get("threadId")
                             with database() as db:
@@ -585,11 +597,17 @@ def bridge(child, key_id):
                                     "SELECT 1 FROM threads WHERE id=? AND device=?", (thread, key_id)).fetchone():
                                     raise ValueError("thread not found")
                             config["threadId"] = thread
+                        else:
+                            config["environments"] = []
+                            config["dynamicTools"] = params.get("dynamicTools", [])
                         message["params"] = config
                     elif method == "turn/start" and not started and allowed_thread and params.get("threadId") == allowed_thread:
                         check_access()
                         started = True
                         message["params"] = {key: params[key] for key in ("threadId", "input", "effort") if key in params}
+                        # Resume does not support thread-level environments. Disable the cloud
+                        # environment explicitly for every turn, regardless of the client.
+                        message["params"]["environments"] = []
                     elif method == "turn/interrupt" and started and params.get("threadId") == allowed_thread:
                         message["params"] = {"threadId": allowed_thread, "turnId": params.get("turnId")}
                     else:

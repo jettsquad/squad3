@@ -28,7 +28,7 @@ import {
   checkMaterial,
   checkPromptSet,
   composeSeatPrompt,
-  connectionMismatch,
+  connectionCompatibility,
   EMPTY_TEAM_PROMPTS,
   EMPTY_TOTALS,
   imagePathOfMaterial,
@@ -66,6 +66,7 @@ import {
   type SeatSpec,
   type UsageTotals,
 } from "../../shared/index.ts";
+import type { ConnectionBackend, SeatConnection } from "../../shared/connection.ts";
 import { parseMentions } from "../../shared/mention.ts";
 import {
   hostLineText,
@@ -501,9 +502,9 @@ export interface TableLibrary {
   /** A library agent, live or soft-deleted. */
   template(templateId: string): AgentTemplate | undefined;
   /** Whether a connection with this id exists. */
-  hasConnection(connectionId: string): { readonly backend: string; readonly displayName: string } | undefined;
+  hasConnection(connectionId: string): SeatConnection | undefined;
   /** Looked up at each turn's start, key resolved. Throws when the connection is gone. */
-  resolveConnection(connectionId: string): ResolvedConnection;
+  resolveConnection(connectionId: string, harness?: ConnectionBackend): ResolvedConnection;
   /** What seats call the host. Copied into a team when it is created. */
   hostDisplayName(): string | undefined;
   /** A library prompt block, live or soft-deleted: to tell an edited team copy from an untouched one. */
@@ -833,7 +834,7 @@ export function createTable(deps: TableDeps): Table {
   const connectionOf = (seat: SeatSpec): ResolvedConnection | undefined => {
     const connectionId = (seat.connectionId ?? "").trim();
     if (connectionId === "") return undefined;
-    return libraryOf().resolveConnection(connectionId);
+    return libraryOf().resolveConnection(connectionId, seat.backend);
   };
   const templateOf = (templateId: string): AgentTemplate => {
     const template = libraryOf().template(templateId);
@@ -850,7 +851,7 @@ export function createTable(deps: TableDeps): Table {
     if (id === "") return;
     const found = libraryOf().hasConnection(id);
     if (found === undefined) throw new Error(`没有这个连接：${id}。`);
-    const mismatch = connectionMismatch(backend, found.backend, found.displayName);
+    const mismatch = connectionCompatibility(backend, found);
     if (mismatch !== undefined) throw new Error(mismatch);
   };
   const hostName = (): string => {
@@ -989,7 +990,9 @@ export function createTable(deps: TableDeps): Table {
         ? `它用的连接「${connectionId}」已经不在了。到席位设置里换一个连接，或者改回本机登录。`
         : templateGone
           ? "它来自的 Agent 已经不在库里了。可以重新关联到库里的另一个 Agent。"
-          : undefined;
+          : found === undefined
+            ? undefined
+            : connectionCompatibility(seat.backend, found);
     return {
       ...(seat.templateId === undefined ? {} : { templateId: seat.templateId }),
       ...(connectionId === "" ? {} : { connectionId }),

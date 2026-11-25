@@ -139,7 +139,6 @@ async function register(
       connectionId: `device-${result.deviceId}`,
       displayName: "云端 MiniMax",
       authMode: "api-key",
-      backend: "codex",
       source: "octopus",
       cloud: {
         host: result.sshHost,

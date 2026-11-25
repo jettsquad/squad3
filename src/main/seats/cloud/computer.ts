@@ -4,6 +4,7 @@ import type { ResolvedCommand } from "../../seat-runtime/index.ts";
 
 type ComputerAction = {
   action: "list_windows" | "observe" | "click" | "type_text" | "press_key" | "scroll";
+  windowTitle?: string;
   windowId?: number;
   app?: string;
   elementIndex?: number;
@@ -115,8 +116,12 @@ export class ComputerExecutor {
 
   async call(input: ComputerAction): Promise<Result> {
     if (input.action === "list_windows") {
+      if (input.windowTitle !== undefined && (typeof input.windowTitle !== "string" || input.windowTitle.length > 500))
+        throw new Error("窗口标题无效。");
+      const filter =
+        input.windowTitle === undefined ? "" : `.filter(w => w.title === ${JSON.stringify(input.windowTitle)})`;
       return this.run(
-        "globalThis.squadWindows = await sky.list_windows(); nodeRepl.write(JSON.stringify(squadWindows));",
+        `globalThis.squadState = undefined; globalThis.squadWindows = (await sky.list_windows())${filter}; nodeRepl.write(JSON.stringify(squadWindows));`,
       );
     }
     if (!Number.isSafeInteger(input.windowId) || typeof input.app !== "string" || input.app.length > 500) {
@@ -124,21 +129,32 @@ export class ComputerExecutor {
     }
     const window = JSON.stringify({ id: input.windowId, app: input.app });
     const select = `const w = (globalThis.squadWindows || []).find(x => x.id === ${input.windowId} && x.app === ${JSON.stringify(input.app)}); if (!w) throw new Error("请重新列出窗口"); if (/(powershell|cmd\\.exe|terminal|conhost|regedit|security|credential|password|lockapp|codex)/i.test(w.app + " " + (w.title || ""))) throw new Error("该窗口不允许自动操作");`;
+    // node_repl preserves top-level bindings and prefixes later output with redeclaration warnings.
+    const runForWindow = (code: string) => this.run(`{ ${select} ${code} }`);
     switch (input.action) {
       case "observe":
-        return this.run(
-          `${select} globalThis.squadState = await sky.get_window_state({window:w,include_screenshot:true,include_text:true}); nodeRepl.write(JSON.stringify({window:squadState.window,accessibility:squadState.accessibility,screenshots:squadState.screenshots.map(({url,...rest})=>rest)}));`,
+        return runForWindow(
+          `globalThis.squadState = await sky.get_window_state({window:w,include_screenshot:true,include_text:true}); nodeRepl.write(JSON.stringify({window:squadState.window,accessibility:squadState.accessibility,screenshots:squadState.screenshots.map(({url,...rest})=>rest)}));`,
         );
-      case "click":
+      case "click": {
         if (!Number.isSafeInteger(input.elementIndex) && !(Number.isFinite(input.x) && Number.isFinite(input.y)))
           throw new Error("点击位置无效。");
-        return this.run(
-          `${select} if (!globalThis.squadState || squadState.window.id !== w.id) throw new Error("请先观察目标窗口"); await sky.click(${JSON.stringify({ window: JSON.parse(window), element_index: input.elementIndex, x: input.x, y: input.y, screenshotId: input.screenshotId })}); globalThis.squadState = undefined; nodeRepl.write("点击完成");`,
+        // A single observed image already identifies the coordinate space.
+        const click = JSON.stringify({
+          window: JSON.parse(window),
+          element_index: input.elementIndex,
+          x: input.x,
+          y: input.y,
+          screenshotId: input.screenshotId,
+        });
+        return runForWindow(
+          `if (!globalThis.squadState || squadState.window.id !== w.id || squadState.window.app !== w.app) throw new Error("请先观察目标窗口"); const click = ${click}; if (click.element_index === undefined && click.screenshotId === undefined) { if (squadState.screenshots.length !== 1) throw new Error("请提供本次观察中要点击的截图 ID"); click.screenshotId = squadState.screenshots[0].id; } await sky.click(click); globalThis.squadState = undefined; nodeRepl.write("点击完成");`,
         );
+      }
       case "type_text":
         if (typeof input.text !== "string" || input.text.length > 10000) throw new Error("输入文本无效。");
-        return this.run(
-          `${select} if (!globalThis.squadState || squadState.window.id !== w.id) throw new Error("请先观察目标窗口"); await sky.type_text({window:w,text:${JSON.stringify(input.text)}}); globalThis.squadState = undefined; nodeRepl.write("输入完成");`,
+        return runForWindow(
+          `if (!globalThis.squadState || squadState.window.id !== w.id) throw new Error("请先观察目标窗口"); await sky.type_text({window:w,text:${JSON.stringify(input.text)}}); globalThis.squadState = undefined; nodeRepl.write("输入完成");`,
         );
       case "press_key":
         if (
@@ -147,14 +163,14 @@ export class ComputerExecutor {
           /(^|\+)(win|windows|meta|super|cmd)(\+|$)/i.test(input.key)
         )
           throw new Error("按键无效。");
-        return this.run(
-          `${select} if (!globalThis.squadState || squadState.window.id !== w.id) throw new Error("请先观察目标窗口"); await sky.press_key({window:w,key:${JSON.stringify(input.key)}}); globalThis.squadState = undefined; nodeRepl.write("按键完成");`,
+        return runForWindow(
+          `if (!globalThis.squadState || squadState.window.id !== w.id) throw new Error("请先观察目标窗口"); await sky.press_key({window:w,key:${JSON.stringify(input.key)}}); globalThis.squadState = undefined; nodeRepl.write("按键完成");`,
         );
       case "scroll":
         if (!Number.isFinite(input.x) || !Number.isFinite(input.y) || !Number.isFinite(input.scrollY))
           throw new Error("滚动参数无效。");
-        return this.run(
-          `${select} if (!globalThis.squadState || squadState.window.id !== w.id) throw new Error("请先观察目标窗口"); await sky.scroll({window:w,x:${input.x},y:${input.y},scrollX:0,scrollY:${input.scrollY}}); globalThis.squadState = undefined; nodeRepl.write("滚动完成");`,
+        return runForWindow(
+          `if (!globalThis.squadState || squadState.window.id !== w.id) throw new Error("请先观察目标窗口"); await sky.scroll({window:w,x:${input.x},y:${input.y},scrollX:0,scrollY:${input.scrollY}}); globalThis.squadState = undefined; nodeRepl.write("滚动完成");`,
         );
       default:
         throw new Error("不支持的 Computer Use 操作。");

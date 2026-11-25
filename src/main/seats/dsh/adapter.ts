@@ -17,6 +17,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { reasoningEffortsFor } from "../../../shared/reasoning-effort.ts";
+import { inferenceProtocol } from "../../../shared/connection.ts";
 import {
   deferredRun,
   refusedRun,
@@ -77,11 +78,19 @@ export function createDshAdapter(options: DshAdapterOptions): SeatAdapter {
         return refusedRun(`⚠️ ${error instanceof Error ? error.message : String(error)}`);
       }
       const connection = request.connection?.connection;
+      const protocol = connection === undefined ? undefined : inferenceProtocol(connection);
       const modelId = (connection?.modelId ?? "").trim();
       const effort = request.seat.reasoningEffort;
       // Checked against the route the model will actually take — the DeepSeek
       // route has `off` and no `medium`, the compatible route the reverse.
-      if (effort !== undefined && !reasoningEffortsFor({ backend: "dsh", model: modelId }).includes(effort)) {
+      if (
+        effort !== undefined &&
+        !reasoningEffortsFor({
+          backend: "dsh",
+          model: modelId,
+          dshNative: protocol === undefined ? undefined : protocol === "deepseek-native",
+        }).includes(effort)
+      ) {
         return refusedRun(
           `⚠️ ${modelId === "" ? "DeepSeek 默认模型" : modelId} 走的这条线路没有「${effort}」这一档思考强度。`,
         );
@@ -93,7 +102,7 @@ export function createDshAdapter(options: DshAdapterOptions): SeatAdapter {
         // The connection's model and endpoint: dsh has no environment variable
         // for either, so without this a MiniMax key goes to DeepSeek's
         // endpoint and comes back as an invalid key (2.x §12).
-        const model = buildDshPatch({ model: modelId, baseUrl: (connection?.endpoint ?? "").trim(), effort });
+        const model = buildDshPatch({ protocol, model: modelId, baseUrl: (connection?.endpoint ?? "").trim(), effort });
         // ALWAYS written: the heartbeat must be mounted on every run, and the
         // delegation fence rides the same patch (off unless this seat was
         // created allowing subagents).

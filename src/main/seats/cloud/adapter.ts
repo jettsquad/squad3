@@ -27,6 +27,7 @@ import { ComputerExecutor, type ComputerApproval } from "./computer.ts";
 type CommandResolver = (name: string) => ResolvedCommand;
 interface ThreadReply {
   readonly thread: { readonly id: string };
+  readonly approvalPolicy?: string;
 }
 interface ToolCall {
   readonly threadId: string;
@@ -78,16 +79,20 @@ const COMPUTER_TOOL = {
   type: "function",
   name: "workstation_computer",
   description:
-    "Use the local Windows Computer Use interface. First list_windows, then observe a listed window before each click, type_text, press_key or scroll. The observation returns accessibility text and screenshots. Do not use terminal, authentication or security windows.",
+    "Use the local Windows Computer Use interface. First list_windows, then observe a listed window before each click, type_text, press_key or scroll. For every action except list_windows, pass both windowId (the listed id) and app (the exact listed app). The observation returns accessibility text and screenshots. Click coordinates are pixels relative to the screenshot's top-left; do not add originX or originY. For a single screenshot omit screenshotId; for multiple screenshots copy the chosen id exactly. Do not use terminal, authentication or security windows.",
   inputSchema: {
     type: "object",
     properties: {
       action: { type: "string", enum: ["list_windows", "observe", "click", "type_text", "press_key", "scroll"] },
+      windowTitle: {
+        type: "string",
+        description: "Optional exact title for list_windows; only matching windows are returned.",
+      },
       windowId: { type: "integer" },
       app: { type: "string" },
       elementIndex: { type: "integer" },
-      x: { type: "number" },
-      y: { type: "number" },
+      x: { type: "number", description: "Horizontal pixels from the screenshot's left edge, not a screen coordinate." },
+      y: { type: "number", description: "Vertical pixels from the screenshot's top edge, not a screen coordinate." },
       text: { type: "string" },
       key: { type: "string" },
       scrollY: { type: "number" },
@@ -98,12 +103,38 @@ const COMPUTER_TOOL = {
   },
 };
 
+const CLOUD_REASONING_CONFIG = {
+  features: {
+    shell_tool: false,
+    hooks: false,
+    plugins: false,
+    apps: false,
+    multi_agent: false,
+    multi_agent_v2: false,
+    view_image: false,
+  },
+  web_search: "disabled",
+  mcp_servers: {},
+};
+const CLOUD_NATIVE_TOOL_ITEMS = new Set([
+  "commandExecution",
+  "fileChange",
+  "mcpToolCall",
+  "collabAgentToolCall",
+  "collabToolCall",
+  "subAgentActivity",
+  "webSearch",
+  "imageView",
+  "imageGeneration",
+]);
+
 /** Stable scope: changing a connection/profile/account revision cannot resume its old thread. */
 export function cloudScope(connection: SeatConnection, cwd: string, seatId: string, scene?: string): string {
   const { quotaProvider: _quotaProvider, ...profile } = connection.cloud ?? {};
   return createHash("sha256")
     .update(
       JSON.stringify([
+        "workstation-harness-v1",
         connection.connectionId,
         connection.cloud === undefined ? undefined : profile,
         connection.modelId,
@@ -287,8 +318,9 @@ export function createCloudAdapter(options: {
       if (problems.length > 0) return refusedRun(problems.map((p) => p.detail).join("\n"));
       const mode = request.seat.permissionMode ?? "workspace";
       if (!["read-only", "workspace", "yolo"].includes(mode)) return refusedRun(`Codex 没有「${mode}」这种权限模式。`);
-      if (request.seat.subagents === true || request.seat.hostCustomizations === true)
-        return refusedRun("云端来源暂不支持本机自定义工具或子 agent；请在席位设置中关闭后使用。");
+      // These are options for other execution paths: hostCustomizations is a
+      // Claude setting, and native cloud subagents remain disabled on this route.
+      // Existing templates can carry either value; neither changes the local Harness.
       if (request.persona !== undefined) return refusedRun("云端 Codex 的 persona 应合入 prompt。");
       let cwd: string;
       try {
@@ -356,6 +388,7 @@ function runCloud(
   let uncertain = false;
   let inFlight = false;
   let failure: Error | undefined;
+  let cloudPolicyFailure: Error | undefined;
   const actions = new Map<string, { digest: string; result: Promise<ToolReply> }>();
   let settleTurn: (() => void) | undefined;
   let rejectTurn: ((e: Error) => void) | undefined;
@@ -421,7 +454,8 @@ function runCloud(
   }
 
   async function tool(call: ToolCall): Promise<ToolReply> {
-    if (cancelled || ended || uncertain) return textResult("本地执行已停止或需要核对，不允许继续。", false);
+    if (cancelled || ended || uncertain || cloudPolicyFailure !== undefined)
+      return textResult("本地执行已停止或需要核对，不允许继续。", false);
     if (call.threadId !== threadId || call.turnId !== turnId) return textResult("工具调用不属于当前回合。", false);
     if (++toolCount > 40) return textResult("本轮超过 40 次工具调用上限。", false);
     if (call.tool === "workstation_computer") {
@@ -733,6 +767,18 @@ function runCloud(
         }
         const p = m.params;
         if (p === undefined || p["threadId"] !== threadId) return;
+        if (m.method === "item/started" || m.method === "item/completed") {
+          const itemType = (p["item"] as { type?: string } | undefined)?.type;
+          if (itemType !== undefined && CLOUD_NATIVE_TOOL_ITEMS.has(itemType)) {
+            if (inFlight) uncertain = true;
+            cloudPolicyFailure ??= new Error(
+              `云端报告了原生工具操作（${itemType}），本轮已停止。工作站任务必须交给 Squad 的本机 Harness。`,
+            );
+            rejectTurn?.(cloudPolicyFailure);
+            return;
+          }
+        }
+        if (cloudPolicyFailure !== undefined) return;
         if (m.method === "item/agentMessage/delta" && typeof p["delta"] === "string") {
           text += p["delta"];
           received += p["delta"].length;
@@ -771,11 +817,18 @@ function runCloud(
       };
       await cloud.initialize();
       const params: Record<string, unknown> = {
-        approvalPolicy: "on-request",
+        approvalPolicy: "never",
         sandbox: "read-only",
-        environments: [],
-        dynamicTools: [SHELL_TOOL, IMAGE_TOOL, COMPUTER_TOOL],
-        developerInstructions: `You are a Squad 3 cloud seat. The workstation is ${process.platform}; its project is ${request.cwd}. Use workstation_computer for desktop and browser UI, not shell or browser debugging. List windows, then observe before each action. Do not automate terminal, authentication or security windows. Do not access cloud business files or native tools. The host owns orchestration; respect local refusals and never retry unknown effects.`,
+        config: CLOUD_REASONING_CONFIG,
+        ...(resumed === undefined ? { environments: [], dynamicTools: [SHELL_TOOL, IMAGE_TOOL, COMPUTER_TOOL] } : {}),
+        developerInstructions: [
+          "You are the reasoning agent for a Squad seat. Squad's local Harness executes workstation actions for you.",
+          "For any task requiring a tool, call the appropriate workstation_* function, wait for its result, and continue this same turn from that result.",
+          "Do not use the cloud runtime's shell, filesystem, MCP, search, or subagents. Do not install tools on the cloud host or ask the user to perform an action the local Harness can do.",
+          `The local workstation is ${process.platform}; its project is ${request.cwd}. Use workstation_shell for local commands and files and workstation_image to inspect local project images.`,
+          "Use workstation_computer for desktop and browser UI; do not use shell or browser debugging for UI. List windows, then observe before each action. Do not automate terminal, authentication or security windows.",
+          "Respect refusals from the local Harness, never retry unknown effects, and report missing local capabilities without switching to cloud tools.",
+        ].join("\n"),
         ...(connection.modelId === undefined || connection.modelId === "" ? {} : { model: connection.modelId }),
       };
       let opened: ThreadReply;
@@ -796,13 +849,17 @@ function runCloud(
           };
         throw e;
       }
+      if (opened.approvalPolicy !== "never")
+        throw new Error("云端运行时未确认仅推理模式；已停止发送任务。请更新云端设备网关或 Codex App Server。");
       threadId = opened.thread.id;
       await cloud.request("turn/start", {
         threadId,
+        environments: [],
         input: [{ type: "text", text: request.prompt }],
         ...(request.seat.reasoningEffort === undefined ? {} : { effort: request.seat.reasoningEffort }),
       });
       await done;
+      if (cloudPolicyFailure !== undefined) throw cloudPolicyFailure;
       if (uncertain) throw new Error("本地操作仍需核对，不把云端回答当作成功。");
       return {
         text,

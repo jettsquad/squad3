@@ -2,7 +2,7 @@
  * seats — the adapters, one per backend, behind one interface.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { resolveCommand, type CommandHost, type ResolvedCommand } from "../seat-runtime/index.ts";
+import { refusedRun, resolveCommand, type CommandHost, type ResolvedCommand } from "../seat-runtime/index.ts";
 import { createClaudeCodeAdapter } from "./claude-code/adapter.ts";
 import { createCodexAdapter } from "./codex/adapter.ts";
 import { createDshAdapter } from "./dsh/adapter.ts";
@@ -10,7 +10,7 @@ import type { SeatAdapter } from "./types.ts";
 import { createCloudAdapter, readCloudQuota } from "./cloud/adapter.ts";
 import { activateCloudDevice, cloudDeviceStatus, cloudSubscription } from "./cloud/pairing.ts";
 import { cloudExecutions } from "./cloud/executions.ts";
-import type { SeatConnection } from "../../shared/connection.ts";
+import { connectionCompatibility, type SeatConnection } from "../../shared/connection.ts";
 import type { ComputerApproval } from "./cloud/computer.ts";
 
 export type { ResolvedConnection, SeatAdapter, SeatCapabilities, SeatRequest } from "./types.ts";
@@ -56,14 +56,16 @@ export function createSeats(options: SeatsOptions) {
     active,
     approveComputer: options.approveComputer,
   });
-  const localCodex = adapters.get("codex");
-  if (localCodex !== undefined)
-    adapters.set("codex", {
-      ...localCodex,
-      // Same capabilities as local Codex: all existing callers, including secretary and Lil X,
-      // select the source on the live resolved connection at start, without duplicating routing.
-      start: (request) =>
-        request.connection?.connection.source === "octopus" ? cloud.start(request) : localCodex.start(request),
+  for (const [harness, adapter] of adapters)
+    adapters.set(harness, {
+      ...adapter,
+      start: (request) => {
+        const source = request.connection?.connection;
+        if (source === undefined) return adapter.start(request);
+        const problem = connectionCompatibility(harness, source);
+        if (problem !== undefined) return refusedRun(problem);
+        return source.source === "octopus" ? cloud.start(request) : adapter.start(request);
+      },
     });
   return {
     executions: cloudExecutions(options.stateDir, active),

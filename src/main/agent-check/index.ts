@@ -18,7 +18,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  connectionMismatch,
+  connectionCompatibility,
   reconcileReachability,
   type AgentCheckReport,
   type AgentTemplate,
@@ -118,10 +118,7 @@ export function createAgentCheck(deps: AgentCheckDeps): AgentCheck {
     // ① The seat backend: an adapter for it, and a connection that exists and
     // belongs to it. Each of these otherwise fails at the FIRST ROUND.
     const adapter = deps.seats.adapterFor(template.backend);
-    const mismatch =
-      connection === undefined
-        ? undefined
-        : connectionMismatch(template.backend, connection.backend, connection.displayName);
+    const mismatch = connection === undefined ? undefined : connectionCompatibility(template.backend, connection);
     const backendProblem =
       typeof adapter === "string"
         ? adapter
@@ -235,7 +232,9 @@ export function createAgentCheck(deps: AgentCheckDeps): AgentCheck {
       let resolved: ResolvedConnection | undefined;
       try {
         resolved =
-          connection === undefined ? undefined : { connection, env: deps.library.connections.envFor(connectionId) };
+          connection === undefined
+            ? undefined
+            : { connection, env: deps.library.connections.envFor(connectionId, template.backend) };
       } catch (failure) {
         checks.push({
           name: "真的问一句",

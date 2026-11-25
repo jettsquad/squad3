@@ -3,15 +3,12 @@
  *
  * 移植自 Squad 2.x packages/console/src/client/agents.tsx @ 8dcb903
  * 改动：文案直接写中文（多语言在阶段 3c）；声音一栏在阶段 5（朗读）回来，组件在 Voice.tsx；
- * 表单里新建连接时，先存连接、再存 agent（2.x 在服务端一次做完，这里是两次调用，顺序一样）。
- *
- * Model, endpoint and key sit on THIS form even though they belong to a
- * connection, because that is the moment a person is thinking about them.
- * What gets stored is still a connection plus a reference to it.
+ * An Agent pairs an existing inference connection with a local Harness.
  */
 import { useState, type JSX } from "react";
 import {
-  credentialRefFor,
+  connectionCompatibility,
+  inferenceProtocol,
   defaultEffortOf,
   defaultPermissionMode,
   meaningfulCaps,
@@ -68,13 +65,6 @@ interface Draft {
   voiceId: string;
   /** "" means the host's own login. */
   connectionId: string;
-  /** Only when building a new connection from this form. */
-  authMode: AuthMode;
-  modelId: string;
-  endpoint: string;
-  credentialRef: string;
-  useExistingCredential: boolean;
-  credential: string;
   maxTurns: string;
   maxTokens: string;
   maxCostUsd: string;
@@ -96,12 +86,6 @@ const blank = (): Draft => ({
   color: COLORS[0] ?? "#2e7d6b",
   voiceId: "",
   connectionId: "",
-  authMode: "subscription",
-  modelId: "",
-  endpoint: "",
-  credentialRef: "",
-  useExistingCredential: false,
-  credential: "",
   maxTurns: "",
   maxTokens: "",
   maxCostUsd: "",
@@ -148,7 +132,7 @@ export function capsOf(
 }
 
 /** What 「默认」 actually means for this backend and model, said in the option itself. */
-function defaultEffortLabel(target: { backend: AgentBackend; model?: string | undefined }): string {
+function defaultEffortLabel(target: Parameters<typeof defaultEffortOf>[0]): string {
   const fallback = defaultEffortOf(target);
   return fallback.kind === "sends"
     ? t("思考强度：默认（实际会用 {effort}）", { effort: fallback.level })
@@ -168,7 +152,6 @@ const WEB_NOTE: Readonly<Record<string, string>> = {
 export function AgentsPage(): JSX.Element {
   const { library, error: loadError } = useLibrary();
   const [draft, setDraft] = useState<Draft>(blank);
-  const [newConnection, setNewConnection] = useState(false);
   /**
    * Per-agent test reports. `"running"` is its own state, not a spinner over
    * a stale report — a person who clicks 测试 on an agent they just edited
@@ -182,6 +165,14 @@ export function AgentsPage(): JSX.Element {
 
   const agents = library?.agents ?? [];
   const connections = library?.connections ?? [];
+  const selectedConnection = connections.find((c) => c.connectionId === draft.connectionId);
+  const cloudReasoning = draft.backend === "codex" && selectedConnection?.source === "octopus";
+  const pairingProblem =
+    selectedConnection === undefined
+      ? draft.connectionId === ""
+        ? undefined
+        : t("⚠️ 连接已删除")
+      : connectionCompatibility(draft.backend, selectedConnection);
   const lower = query.trim().toLowerCase();
   // Searched over the prompt too: 「哪个 agent 里写了红队」 is a real way to look for one.
   const shown = agents.filter(
@@ -194,49 +185,20 @@ export function AgentsPage(): JSX.Element {
 
   // The auth mode the caps must obey: the chosen connection's, the one being
   // configured here, or the host login's subscription.
-  const mode: AuthMode = newConnection
-    ? draft.authMode
-    : draft.connectionId === ""
-      ? "subscription"
-      : (connections.find((c) => c.connectionId === draft.connectionId)?.authMode ?? "subscription");
-  const model = newConnection ? draft.modelId : connections.find((c) => c.connectionId === draft.connectionId)?.modelId;
-  const effortTarget = { backend: draft.backend, model };
+  const mode: AuthMode = selectedConnection?.authMode ?? "subscription";
+  const model = selectedConnection?.modelId;
+  const protocol = selectedConnection === undefined ? undefined : inferenceProtocol(selectedConnection);
+  const effortTarget = {
+    backend: draft.backend,
+    model,
+    dshNative: protocol === undefined ? undefined : protocol === "deepseek-native",
+  };
 
   const save = async (): Promise<void> => {
     setRefused([]);
     const done = await action.run(async () => {
       const caps = capsOf(draft, mode);
-      let connectionId = draft.connectionId;
-      if (newConnection) {
-        // The connection first: an agent naming a connection that failed to
-        // save would point at nothing.
-        connectionId = `conn-${draft.templateId}`;
-        await call("connections.save", {
-          connection: {
-            connectionId,
-            displayName: t("{name} 的连接", {
-              name: draft.displayName.trim() === "" ? t("未命名") : draft.displayName.trim(),
-            }),
-            authMode: draft.authMode,
-            backend: draft.backend,
-            ...(draft.modelId.trim() === "" ? {} : { modelId: draft.modelId.trim() }),
-            ...(draft.authMode === "api-key" && draft.endpoint.trim() !== ""
-              ? { endpoint: draft.endpoint.trim() }
-              : {}),
-            ...(draft.authMode !== "api-key"
-              ? {}
-              : {
-                  credentialRef:
-                    draft.useExistingCredential && draft.credentialRef.trim() !== ""
-                      ? draft.credentialRef.trim()
-                      : credentialRefFor(connectionId),
-                }),
-          },
-          ...(draft.authMode === "api-key" && !draft.useExistingCredential && draft.credential !== ""
-            ? { credential: draft.credential }
-            : {}),
-        });
-      }
+      const connectionId = draft.connectionId;
       const existing = agents.find((agent) => agent.templateId === draft.templateId);
       return call("agents.save", {
         agent: {
@@ -266,7 +228,6 @@ export function AgentsPage(): JSX.Element {
     // The agent WAS saved; a team mid-round keeps its old copy until the next save.
     setRefused(done.refused);
     setDraft(blank());
-    setNewConnection(false);
   };
 
   const test = (agent: AgentWire): void => {
@@ -330,20 +291,17 @@ export function AgentsPage(): JSX.Element {
             onChange={(event) => set({ systemPrompt: event.target.value })}
           />
 
+          <div className="section-title">{t("本机 Harness")}</div>
           <div className="seat-row" style={{ marginTop: 8 }}>
             <select
+              aria-label={t("本机 Harness")}
               value={draft.backend}
               onChange={(event) => {
                 const backend = event.target.value as AgentBackend;
-                // The mode list changes with the backend, so the held value
-                // changes with it; a connection of the old backend is dropped,
-                // since the host would refuse the pairing at save.
-                const keep = connections.find((c) => c.connectionId === draft.connectionId)?.backend === backend;
                 set({
                   backend,
                   permissionMode: defaultPermissionMode(backend),
                   reasoningEffort: "",
-                  ...(keep ? {} : { connectionId: "" }),
                 });
               }}
             >
@@ -383,83 +341,26 @@ export function AgentsPage(): JSX.Element {
             </p>
           )}
 
-          <div className="section-title">{t("模型")}</div>
+          <div className="section-title">{t("推理连接")}</div>
           <select
-            value={newConnection ? "__new__" : draft.connectionId}
-            onChange={(event) => {
-              if (event.target.value === "__new__") setNewConnection(true);
-              else {
-                setNewConnection(false);
-                set({ connectionId: event.target.value });
-              }
-            }}
+            aria-label={t("推理连接")}
+            value={draft.connectionId}
+            onChange={(event) => set({ connectionId: event.target.value, reasoningEffort: "" })}
           >
-            <option value="">{t("本机登录（用宿主 CLI 的登录态和默认模型）")}</option>
-            {/* Only this backend's connections: the host refuses the pairing,
-                and not offering it is what stops someone building it. */}
-            {connections
-              .filter((connection) => connection.backend === draft.backend)
-              .map((connection) => (
-                <option key={connection.connectionId} value={connection.connectionId}>
-                  {connection.displayName}
-                  {connection.modelId === undefined ? "" : ` · ${connection.modelId}`}
-                  {connection.authMode === "api-key" && !connection.credentialConfigured
-                    ? ` · ⚠️ ${t("密钥未配置")}`
-                    : ""}
-                </option>
-              ))}
-            <option value="__new__">{t("＋ 新建一个连接…")}</option>
+            <option value="">{t("使用所选 Harness 的本机登录")}</option>
+            {connections.map((connection) => (
+              <option key={connection.connectionId} value={connection.connectionId}>
+                {connection.displayName}
+                {connection.modelId === undefined ? "" : ` · ${connection.modelId}`}
+                {connection.source === "octopus" ? " · Octopus" : ""}
+              </option>
+            ))}
+            {selectedConnection === undefined && draft.connectionId !== "" && (
+              <option value={draft.connectionId}>{t("⚠️ 连接已删除")}</option>
+            )}
           </select>
-
-          {!newConnection ? null : (
-            <div className="card">
-              <div className="seat-row">
-                <select value={draft.authMode} onChange={(event) => set({ authMode: event.target.value as AuthMode })}>
-                  <option value="subscription">{t("订阅（用本机 CLI 的登录态）")}</option>
-                  <option value="api-key">API key</option>
-                </select>
-                <input
-                  value={draft.modelId}
-                  placeholder={draft.authMode === "subscription" ? t("模型（只能是自家的，如 sonnet）") : t("模型")}
-                  onChange={(event) => set({ modelId: event.target.value })}
-                />
-              </div>
-              {draft.authMode !== "api-key" ? null : (
-                <>
-                  <div className="seat-row">
-                    <input
-                      value={draft.endpoint}
-                      placeholder={t("接口地址（留空用默认）")}
-                      onChange={(event) => set({ endpoint: event.target.value })}
-                    />
-                    {draft.useExistingCredential ? (
-                      <input
-                        value={draft.credentialRef}
-                        placeholder={t("环境变量名，如 DEEPSEEK_API_KEY")}
-                        onChange={(event) => set({ credentialRef: event.target.value })}
-                      />
-                    ) : (
-                      <input
-                        type="password"
-                        autoComplete="off"
-                        value={draft.credential}
-                        placeholder={t("API key（只写入，永不回显）")}
-                        onChange={(event) => set({ credential: event.target.value })}
-                      />
-                    )}
-                  </div>
-                  <label className="check">
-                    <input
-                      type="checkbox"
-                      checked={draft.useExistingCredential}
-                      onChange={(event) => set({ useExistingCredential: event.target.checked })}
-                    />
-                    {t("这把 key 已经在环境变量里了")}
-                  </label>
-                </>
-              )}
-            </div>
-          )}
+          <p className="muted">{t("在连接库添加或修改 API 与云端 Agent 来源。")}</p>
+          {pairingProblem !== undefined && <p className="notice inline">{pairingProblem}</p>}
 
           <div className="section-title">{t("上限")}</div>
           <div className="seat-row">
@@ -553,21 +454,27 @@ export function AgentsPage(): JSX.Element {
               </p>
             </>
           )}
-          <label className="check block">
-            <input
-              type="checkbox"
-              checked={draft.subagents}
-              onChange={(event) => set({ subagents: event.target.checked })}
-            />
-            {t("允许派生子 agent")}
-          </label>
-          <p className="muted">
-            {draft.subagents
-              ? t(
-                  "这个 agent 可以把活拆给它自己的子 agent 并行做。子 agent 的过程不进讨论记录，只有它的最终回答进；花费都记在它头上。不适合秘书。",
-                )
-              : t("不能派生子 agent——三种后端都关掉了这个能力。")}
-          </p>
+          {cloudReasoning ? (
+            <p className="muted">{t("Octopus 负责推理，工具由本机 Codex Harness 执行。此连接不启用云端子 Agent。")}</p>
+          ) : (
+            <>
+              <label className="check block">
+                <input
+                  type="checkbox"
+                  checked={draft.subagents}
+                  onChange={(event) => set({ subagents: event.target.checked })}
+                />
+                {t("允许派生子 agent")}
+              </label>
+              <p className="muted">
+                {draft.subagents
+                  ? t(
+                      "这个 agent 可以把活拆给它自己的子 agent 并行做。子 agent 的过程不进讨论记录，只有它的最终回答进；花费都记在它头上。不适合秘书。",
+                    )
+                  : t("不能派生子 agent——三种后端都关掉了这个能力。")}
+              </p>
+            </>
+          )}
 
           <div className="section-title">{t("颜色")}</div>
           <div className="row-gap">
@@ -593,14 +500,18 @@ export function AgentsPage(): JSX.Element {
             </div>
           )}
           <div className="row-gap">
-            <button type="button" className="primary" onClick={() => void save()} disabled={action.busy}>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void save()}
+              disabled={action.busy || pairingProblem !== undefined}
+            >
               {t("保存 Agent")}
             </button>
             <button
               type="button"
               onClick={() => {
                 setDraft(blank());
-                setNewConnection(false);
               }}
             >
               {t("清空")}

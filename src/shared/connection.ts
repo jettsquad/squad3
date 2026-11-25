@@ -20,8 +20,30 @@
 
 export type AuthMode = "subscription" | "api-key";
 
-/** Which CLI or channel a connection speaks through. */
+/** Harness identifiers, also accepted when reading a legacy connection. */
 export type ConnectionBackend = "claude-code" | "codex" | "dsh";
+export const INFERENCE_PROTOCOLS = [
+  "anthropic-messages",
+  "openai-responses",
+  "openai-completions",
+  "deepseek-native",
+] as const;
+export type InferenceProtocol = (typeof INFERENCE_PROTOCOLS)[number];
+export const INFERENCE_PROTOCOL_LABELS: Readonly<Record<InferenceProtocol, string>> = {
+  "anthropic-messages": "Anthropic Messages",
+  "openai-responses": "OpenAI Responses",
+  "openai-completions": "OpenAI Chat Completions",
+  "deepseek-native": "DeepSeek 官方接口",
+};
+const LOGIN_PROTOCOL: Readonly<Record<ConnectionBackend, InferenceProtocol>> = {
+  "claude-code": "anthropic-messages",
+  codex: "openai-responses",
+  dsh: "deepseek-native",
+};
+
+export function defaultInferenceProtocol(harness: ConnectionBackend): InferenceProtocol {
+  return LOGIN_PROTOCOL[harness];
+}
 
 /** Transport credentials are SSH references; provider credentials remain on the server. */
 export interface CloudConnection {
@@ -43,7 +65,9 @@ export interface SeatConnection {
   /** What a person calls it. */
   readonly displayName: string;
   readonly authMode: AuthMode;
-  readonly backend: ConnectionBackend;
+  readonly protocol?: InferenceProtocol | undefined;
+  /** Read compatibility for connections saved before protocol and Harness were split. */
+  readonly backend?: ConnectionBackend | undefined;
   /** Missing in all existing connections: interpreted as local, without rewriting them. */
   readonly source?: "local" | "octopus" | undefined;
   readonly cloud?: CloudConnection | undefined;
@@ -78,6 +102,60 @@ export interface SeatConnection {
    * bug happened in the first place.
    */
   readonly authHeader?: "x-api-key" | "bearer" | undefined;
+}
+
+export function inferenceProtocol(connection: SeatConnection): InferenceProtocol | undefined {
+  if (connection.source === "octopus") return undefined;
+  if (connection.protocol !== undefined) return connection.protocol;
+  if (
+    connection.backend === "dsh" &&
+    connection.authMode === "api-key" &&
+    (connection.modelId ?? "").trim() !== "" &&
+    !connection.modelId?.trim().toLowerCase().startsWith("deepseek")
+  )
+    return "openai-completions";
+  return connection.backend === undefined ? undefined : LOGIN_PROTOCOL[connection.backend];
+}
+
+export function normalizeConnection(connection: SeatConnection): SeatConnection {
+  const { backend: _legacy, protocol: _protocol, ...rest } = connection;
+  const protocol = inferenceProtocol(connection);
+  return { ...rest, ...(protocol === undefined ? {} : { protocol }) };
+}
+
+/** Default only for callers without an Agent template, such as Lil X. */
+export function defaultHarnessForConnection(connection: SeatConnection): ConnectionBackend | undefined {
+  if (connection.source === "octopus") return "codex";
+  switch (inferenceProtocol(connection)) {
+    case "anthropic-messages":
+      return "claude-code";
+    case "openai-responses":
+      return "codex";
+    case "openai-completions":
+    case "deepseek-native":
+      return "dsh";
+  }
+}
+
+export function connectionCompatibility(harness: string, connection: SeatConnection): string | undefined {
+  if (connection.source === "octopus")
+    return harness === "codex"
+      ? undefined
+      : `「${connection.displayName}」需要 Octopus 的本机执行适配；${harness} Harness 尚未接入，目前可选择 Codex。`;
+  const protocol = inferenceProtocol(connection);
+  if (protocol === undefined) return `「${connection.displayName}」没有有效的推理协议。`;
+  if (harness === "dsh" && protocol === "openai-completions" && (connection.modelId ?? "").trim() === "")
+    return `用 DeepSeek Harness 连接「${connection.displayName}」需要明确填写模型 ID。`;
+  if (harness === defaultHarnessForConnection(connection)) return undefined;
+  if (
+    harness === "dsh" &&
+    connection.authMode === "api-key" &&
+    (protocol === "openai-responses" || (protocol === "anthropic-messages" && connection.authHeader !== "bearer"))
+  ) {
+    if ((connection.modelId ?? "").trim() !== "") return undefined;
+    return `用 DeepSeek Harness 连接「${connection.displayName}」需要明确填写模型 ID。`;
+  }
+  return `「${connection.displayName}」使用 ${INFERENCE_PROTOCOL_LABELS[protocol]}（${connection.authMode === "subscription" ? "订阅登录" : "API key"}），目前配不到 ${harness} Harness。`;
 }
 
 /**
@@ -138,7 +216,8 @@ export function checkConnection(connection: SeatConnection): readonly Connection
   if (connection.displayName.trim() === "") problems.push({ detail: "连接要有一个名字。" });
 
   if (connection.source === "octopus") {
-    if (connection.backend !== "codex") problems.push({ detail: "云端来源目前支持 Codex，其他后端尚未接入。" });
+    if (connection.protocol !== undefined)
+      problems.push({ detail: "Octopus 使用云端 Agent 会话，不需要填写 API 协议。" });
     const cloud = connection.cloud;
     if (cloud === undefined) problems.push({ detail: "云端来源需要 SSH 和远端运行配置。" });
     else {
@@ -163,6 +242,15 @@ export function checkConnection(connection: SeatConnection): readonly Connection
     return problems;
   }
   if (connection.cloud !== undefined) problems.push({ detail: "本地来源不能携带云端配置。" });
+  const protocol = inferenceProtocol(connection);
+  const login = defaultHarnessForConnection(connection);
+  if (protocol === undefined) problems.push({ detail: "请选择连接的推理协议。" });
+  if (
+    protocol === "deepseek-native" &&
+    (connection.modelId ?? "").trim() !== "" &&
+    !isOwnModel("dsh", connection.modelId ?? "")
+  )
+    problems.push({ detail: "DeepSeek 官方接口只能使用 DeepSeek 模型。其他模型请按提供方选择 API 协议。" });
 
   if (connection.authMode === "subscription") {
     // Refused rather than ignored. A stored endpoint that never takes effect
@@ -174,10 +262,11 @@ export function checkConnection(connection: SeatConnection): readonly Connection
       problems.push({ detail: "订阅模式不使用 API key。" });
     }
     const model = (connection.modelId ?? "").trim();
-    if (model !== "" && !isOwnModel(connection.backend, model)) {
+    if (protocol === "openai-completions") problems.push({ detail: "Chat Completions 连接需要 API key。" });
+    if (model !== "" && login !== undefined && !isOwnModel(login, model)) {
       problems.push({
         detail:
-          `订阅模式下只能用 ${connection.backend} 自己的模型；「${model}」会被发到登录态的端点，` +
+          `订阅模式下只能用登录提供方自己的模型；「${model}」会被发到登录态的端点，` +
           `报出来的错会指向模型而不是这个不匹配。`,
       });
     }
@@ -251,30 +340,32 @@ const ENV_NAMES: Readonly<Record<ConnectionBackend, EnvNames>> = {
 };
 
 /** The variable whose name decides which header Claude Code sends. */
-function tokenVariable(connection: SeatConnection): string {
-  if (connection.backend !== "claude-code") return ENV_NAMES[connection.backend].token;
+function tokenVariable(connection: SeatConnection, harness: ConnectionBackend): string {
+  if (harness !== "claude-code") return ENV_NAMES[harness].token;
   return connection.authHeader === "bearer" ? "ANTHROPIC_AUTH_TOKEN" : "ANTHROPIC_API_KEY";
 }
 
 export function envForConnection(
   connection: SeatConnection,
   credential?: string | undefined,
+  harness = defaultHarnessForConnection(connection),
 ): Readonly<Record<string, string>> {
-  if (connection.source === "octopus") return {};
-  const names = ENV_NAMES[connection.backend];
+  if (connection.source === "octopus" || harness === undefined || connectionCompatibility(harness, connection))
+    return {};
+  const names = ENV_NAMES[harness];
   if (connection.authMode === "subscription") {
     // Nothing. Not the endpoint, not a token, and the model only when the
     // login can actually serve it AND this backend takes a model from the
     // environment at all.
     const model = (connection.modelId ?? "").trim();
-    if (names.model === undefined || model === "" || !isOwnModel(connection.backend, model)) return {};
+    if (names.model === undefined || model === "" || !isOwnModel(harness, model)) return {};
     return { [names.model]: model };
   }
 
   const env: Record<string, string> = {};
   const endpoint = (connection.endpoint ?? "").trim();
   if (names.baseUrl !== undefined && endpoint !== "") env[names.baseUrl] = endpoint;
-  if (credential !== undefined && credential !== "") env[tokenVariable(connection)] = credential;
+  if (credential !== undefined && credential !== "") env[tokenVariable(connection, harness)] = credential;
   const model = (connection.modelId ?? "").trim();
   // Any model name is safe here: it travels with its own endpoint and token.
   if (names.model !== undefined && model !== "") env[names.model] = model;
@@ -289,12 +380,15 @@ export function envForConnection(
  * foreign model has that name sent to the login's own endpoint, which answers
  * about the model rather than about the mismatch.
  */
-export function modelArgumentFor(connection: SeatConnection): string | undefined {
-  if (ENV_NAMES[connection.backend].model !== undefined) return undefined;
+export function modelArgumentFor(
+  connection: SeatConnection,
+  harness = defaultHarnessForConnection(connection),
+): string | undefined {
+  if (harness === undefined || ENV_NAMES[harness].model !== undefined) return undefined;
   const model = (connection.modelId ?? "").trim();
   if (model === "") return undefined;
   if (connection.authMode === "api-key") return model;
-  return isOwnModel(connection.backend, model) ? model : undefined;
+  return isOwnModel(harness, model) ? model : undefined;
 }
 
 /**

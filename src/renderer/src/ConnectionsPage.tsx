@@ -13,10 +13,19 @@
  * field whose value will be rejected teaches that the form is unreliable.
  */
 import { useEffect, useState, type JSX } from "react";
-import { credentialRefFor, isOwnModel, type AuthMode, type ConnectionBackend } from "../../shared/index.ts";
+import {
+  credentialRefFor,
+  defaultHarnessForConnection,
+  inferenceProtocol,
+  INFERENCE_PROTOCOLS,
+  INFERENCE_PROTOCOL_LABELS,
+  isOwnModel,
+  type AuthMode,
+  type InferenceProtocol,
+} from "../../shared/connection.ts";
 import type { ConnectionViewWire, ConnectionWire, MethodOutput } from "../../shared/wire.ts";
 import { call, useAction } from "./api.ts";
-import { BACKEND_LABELS, libraryChanged, useLibrary } from "./library.ts";
+import { libraryChanged, useLibrary } from "./library.ts";
 import { t } from "./locale.ts";
 
 function Quota({ connectionId }: { connectionId: string }): JSX.Element {
@@ -164,8 +173,9 @@ export function ConnectionsPage({ initialCloudError }: { initialCloudError?: str
    */
   const [editing, setEditing] = useState<string | undefined>(undefined);
   const [name, setName] = useState("");
-  const [mode, setMode] = useState<AuthMode>("subscription");
-  const [backend, setBackend] = useState<ConnectionBackend>("claude-code");
+  const [mode, setMode] = useState<AuthMode>("api-key");
+  const [protocol, setProtocol] = useState<InferenceProtocol>("anthropic-messages");
+  const [authHeader, setAuthHeader] = useState<"x-api-key" | "bearer">("x-api-key");
   const [model, setModel] = useState("");
   const [endpoint, setEndpoint] = useState("");
   const [credentialRef, setCredentialRef] = useState("");
@@ -185,7 +195,8 @@ export function ConnectionsPage({ initialCloudError }: { initialCloudError?: str
   const edit = (connection: ConnectionViewWire): void => {
     setEditing(connection.connectionId);
     setName(connection.displayName);
-    setBackend(connection.backend);
+    setProtocol(inferenceProtocol(connection) ?? "anthropic-messages");
+    setAuthHeader(connection.authHeader ?? "x-api-key");
     setMode(connection.authMode);
     setModel(connection.modelId ?? "");
     setEndpoint(connection.endpoint ?? "");
@@ -202,9 +213,10 @@ export function ConnectionsPage({ initialCloudError }: { initialCloudError?: str
   const clear = (): void => {
     setEditing(undefined);
     setName("");
-    setMode("subscription");
+    setMode("api-key");
     setModel("");
-    setBackend("claude-code");
+    setProtocol("anthropic-messages");
+    setAuthHeader("x-api-key");
     setEndpoint("");
     setCredentialRef("");
     setStoredRef(undefined);
@@ -218,10 +230,11 @@ export function ConnectionsPage({ initialCloudError }: { initialCloudError?: str
       connectionId,
       displayName: name.trim(),
       authMode: mode,
-      backend,
+      protocol,
       source: "local",
       ...(model.trim() === "" ? {} : { modelId: model.trim() }),
       ...(mode === "api-key" && endpoint.trim() !== "" ? { endpoint: endpoint.trim() } : {}),
+      ...(mode === "api-key" && protocol === "anthropic-messages" ? { authHeader } : {}),
       // Derived unless the person named an existing secret: they have a key,
       // and the filing is the system's job.
       ...(mode !== "api-key"
@@ -271,11 +284,7 @@ export function ConnectionsPage({ initialCloudError }: { initialCloudError?: str
     <main className="main scroll">
       <div className="page">
         <h2>{t("连接")}</h2>
-        <p className="muted">
-          {t(
-            "连接可选择本地或云端来源。现有本地登录和 API 配置继续使用；云端模型凭据留在服务器，业务工具在团队项目目录执行。",
-          )}
-        </p>
+        <p className="muted">{t("连接只管理推理来源与凭据。本机 Harness 在 Agent 库里选择。")}</p>
         {!connections.some(
           (connection) => connection.cloud?.managedDeviceId !== undefined && connection.cloud.port !== 22,
         ) && <CloudActivation initialError={initialCloudError} />}
@@ -289,10 +298,10 @@ export function ConnectionsPage({ initialCloudError }: { initialCloudError?: str
             <div className="list-row">
               <strong>{connection.displayName}</strong>
               <span className="muted">
-                {BACKEND_LABELS[connection.backend] ?? connection.backend} ·{" "}
                 {connection.source === "octopus"
-                  ? `${t("云端")} · ${connection.cloud?.host ?? ""} · `
-                  : `${t("本地")} · `}
+                  ? "Octopus Agent"
+                  : INFERENCE_PROTOCOL_LABELS[inferenceProtocol(connection) ?? "anthropic-messages"]}{" "}
+                · {connection.source === "octopus" && `${t("云端")} · ${connection.cloud?.host ?? ""} · `}
                 {connection.authMode === "subscription" ? t("订阅") : "API key"}
                 {connection.modelId === undefined ? "" : ` · ${connection.modelId}`}
                 {connection.endpoint === undefined ? "" : ` · ${connection.endpoint}`}
@@ -337,25 +346,45 @@ export function ConnectionsPage({ initialCloudError }: { initialCloudError?: str
           <div className="card-title">{editing === undefined ? t("新建连接") : t("编辑「{name}」", { name })}</div>
           <div className="seat-row">
             <input value={name} placeholder={t("连接名")} onChange={(event) => setName(event.target.value)} />
-            <select value={backend} onChange={(event) => setBackend(event.target.value as ConnectionBackend)}>
-              <option value="claude-code">Claude Code</option>
-              <option value="codex">{t("Codex（ChatGPT / OpenAI）")}</option>
-              <option value="dsh">DeepSeek Harness</option>
+            <select
+              aria-label={t("API 协议")}
+              value={protocol}
+              onChange={(event) => {
+                const next = event.target.value as InferenceProtocol;
+                setProtocol(next);
+                if (next === "openai-completions") setMode("api-key");
+              }}
+            >
+              {INFERENCE_PROTOCOLS.map((value) => (
+                <option value={value} key={value}>
+                  {t(INFERENCE_PROTOCOL_LABELS[value])}
+                </option>
+              ))}
             </select>
             <select value={mode} onChange={(event) => setMode(event.target.value as AuthMode)}>
-              <option value="subscription">{t("订阅（用本机 CLI 的登录态）")}</option>
+              <option value="subscription" disabled={protocol === "openai-completions"}>
+                {t("订阅（使用已有登录）")}
+              </option>
               <option value="api-key">API key</option>
             </select>
           </div>
           <div className="seat-row">
-            <input
-              value={model}
-              placeholder={mode === "subscription" ? t("模型（只能是 {backend} 自家的）", { backend }) : t("模型")}
-              onChange={(event) => setModel(event.target.value)}
-            />
+            <input value={model} placeholder={t("模型 ID")} onChange={(event) => setModel(event.target.value)} />
           </div>
           {mode !== "api-key" ? null : (
             <>
+              {protocol === "anthropic-messages" && (
+                <label className="field">
+                  <span>{t("认证请求头")}</span>
+                  <select
+                    value={authHeader}
+                    onChange={(event) => setAuthHeader(event.target.value === "bearer" ? "bearer" : "x-api-key")}
+                  >
+                    <option value="x-api-key">x-api-key</option>
+                    <option value="bearer">Authorization: Bearer</option>
+                  </select>
+                </label>
+              )}
               <div className="seat-row">
                 <input
                   value={endpoint}
@@ -394,12 +423,21 @@ export function ConnectionsPage({ initialCloudError }: { initialCloudError?: str
           {/* Said before the save: the host refuses a foreign model on a
               subscription, and that reason is actionable only while the field
               is still in front of the person. */}
-          {mode !== "subscription" || model.trim() === "" || isOwnModel(backend, model.trim()) ? null : (
+          {mode !== "subscription" ||
+          model.trim() === "" ||
+          isOwnModel(
+            defaultHarnessForConnection({
+              connectionId: "draft",
+              displayName: "",
+              authMode: mode,
+              protocol,
+            }) ?? "codex",
+            model.trim(),
+          ) ? null : (
             <p className="notice inline">
-              {t(
-                "「{model}」不是 {backend} 自家的模型。订阅模式用的是本机 CLI 的登录态，这个名字会被发到那个端点，报出来的错会指向模型而不是这个不匹配。要用它就选 API key，填它自己的地址和密钥。",
-                { model: model.trim(), backend },
-              )}
+              {t("「{model}」不属于所选登录提供方。要使用它，请选择 API key 并填写提供方的地址和密钥。", {
+                model: model.trim(),
+              })}
             </p>
           )}
           {action.error !== undefined && <div className="error">{action.error}</div>}

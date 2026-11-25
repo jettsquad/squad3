@@ -93,5 +93,7 @@ jobs:
             note=$'首次启动自动开通云端 MiniMax 的 10 天试用。可申请 1 个月或 1 年使用授权，由后台审核。\n\n'"$note"
           elif [[ "$GITHUB_REF_NAME" == "v3.0.0-dev.9" ]]; then
             note=$'修复 macOS 的「检查更新」。新版能检测较新的兼容版本并提供对应 DMG 的下载按钮。从旧版升级到此版需先手动安装。\n\n'"$note"
+          elif [[ "$GITHUB_REF_NAME" == "v3.0.0-dev.10" ]]; then
+            note=$'连接库只配置推理来源。Agent 库可独立选择推理连接和本机 Harness，现有配置会保留。Octopus 目前仍通过本机 Codex Harness 执行工具。\n\n'"$note"
           fi
           gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes --notes "$note" "${flags[@]}"

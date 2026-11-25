@@ -10,6 +10,22 @@ export const EN: Readonly<Record<string, string>> = {
   "下载 macOS 更新": "Download macOS update",
   "检查后可下载适合此 Mac 的安装包。": "Check for and download an installer for this Mac.",
   "云端 Agent": "Cloud Agent",
+  "本机 Harness": "Local harness",
+  推理连接: "Inference connection",
+  "使用所选 Harness 的本机登录": "Use the selected harness's local login",
+  "在连接库添加或修改 API 与云端 Agent 来源。": "Add or edit API and cloud agent sources in Connections.",
+  "与此 Harness 不兼容": "Incompatible with this harness",
+  "连接只管理推理来源与凭据。本机 Harness 在 Agent 库里选择。":
+    "Connections manage inference sources and credentials. Choose the local harness in the Agent library.",
+  "API 协议": "API protocol",
+  "DeepSeek 官方接口": "DeepSeek native API",
+  "模型 ID": "Model ID",
+  "订阅（使用已有登录）": "Subscription (use existing sign-in)",
+  认证请求头: "Authentication header",
+  "「{model}」不属于所选登录提供方。要使用它，请选择 API key 并填写提供方的地址和密钥。":
+    "“{model}” does not belong to the selected sign-in provider. Select API key and enter its provider address and key.",
+  "Octopus 负责推理，工具由本机 Codex Harness 执行。此连接不启用云端子 Agent。":
+    "Octopus handles reasoning and the local Codex harness runs tools. This connection does not enable cloud subagents.",
   "云端 MiniMax 首次开通后可试用 10 天。": "Try Cloud MiniMax for 10 days after first activation.",
   "重试开通云端 Agent": "Retry Cloud Agent setup",
   "云端 Agent 订阅": "Cloud Agent subscription",

@@ -112,6 +112,33 @@ describe("cloud sources", () => {
       if (flavor === "computer-click") expect(s.localStarts()).toBe(0);
     }
   });
+  it("filters windows, binds the sole screenshot on click, and returns clean observations", async () => {
+    const computer = new ComputerExecutor(
+      () => ({
+        file: process.execPath,
+        prefixArgs: [resolve("test/fixtures/cloud-runtime.mjs"), "local", "computer-repl-scope"],
+      }),
+      process.cwd(),
+    );
+    try {
+      await computer.start();
+      const windows = await computer.call({ action: "list_windows", windowTitle: "Fixture" });
+      expect(JSON.parse(windows.content[0]?.text ?? "")).toEqual([{ id: 123, app: "fixture.exe", title: "Fixture" }]);
+      const target = { windowId: 123, app: "fixture.exe" };
+      const observe = async () => {
+        const result = await computer.call({ action: "observe", ...target });
+        return JSON.parse(result.content[0]?.text ?? "");
+      };
+      expect(await observe()).toMatchObject({ accessibility: { tree: "Count: 0" } });
+      await computer.call({ action: "click", ...target, x: 10, y: 10 });
+      expect(await observe()).toMatchObject({
+        accessibility: { tree: "Count: 1" },
+        screenshots: [{ id: "screenshot-0", width: 100, height: 100 }],
+      });
+    } finally {
+      await computer.close();
+    }
+  });
   it("forwards computer-use approvals and honors rejection", async () => {
     for (const accepted of [true, false]) {
       const questions: string[] = [];

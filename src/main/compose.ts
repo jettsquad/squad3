@@ -14,13 +14,15 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative } from "node:path";
 import { captureWindow } from "../shared/capture-window.ts";
 import {
-  connectionMismatch,
+  connectionCompatibility,
+  defaultHarnessForConnection,
   credentialFrom,
   languageBoostFor,
   parseAgendaSpec,
   stripReasoning,
   type AgendaSpec,
   type SeatSpec,
+  type ConnectionBackend,
 } from "../shared/index.ts";
 import { parseMentions } from "../shared/mention.ts";
 import { createReasoning, type Criterion } from "./reasoning/index.ts";
@@ -181,15 +183,15 @@ export function compose(env: AppEnvironment): Composed {
     dshCommand: () => library.settings.get().dshCommand,
   });
   /** Looked up at each turn's start, key resolved: an edited model or a rotated key reaches the very next turn. */
-  const resolveConnection = (connectionId: string): ResolvedConnection => {
+  const resolveConnection = (connectionId: string, harness?: ConnectionBackend): ResolvedConnection => {
     const connection = library.connections.get(connectionId);
     if (connection === undefined) throw new Error(`席位用的连接「${connectionId}」已经不在了。`);
-    return { connection, env: library.connections.envFor(connectionId) };
+    return { connection, env: library.connections.envFor(connectionId, harness) };
   };
   const secretary = createSecretary(seats, {
     connectionFor: (seat) => {
       const connectionId = (seat.connectionId ?? "").trim();
-      return connectionId === "" ? undefined : resolveConnection(connectionId);
+      return connectionId === "" ? undefined : resolveConnection(connectionId, seat.backend);
     },
   });
   const checkAgent = createAgentCheck({ seats, library });
@@ -225,14 +227,14 @@ export function compose(env: AppEnvironment): Composed {
         displayName: "Lil X",
         role: label,
         systemPrompt: "",
-        backend: chosen?.backend ?? "claude-code",
+        backend: chosen === undefined ? "claude-code" : (defaultHarnessForConnection(chosen) ?? "claude-code"),
         ...(chosen === undefined ? {} : { connectionId: chosen.connectionId }),
       };
       const adapter = seats.adapterFor(seat.backend);
       if (typeof adapter === "string") throw new Error(adapter);
       const result = await adapter.start({
         seat,
-        ...(chosen === undefined ? {} : { connection: resolveConnection(chosen.connectionId) }),
+        ...(chosen === undefined ? {} : { connection: resolveConnection(chosen.connectionId, seat.backend) }),
         cwd: criteriaFolder(),
         prompt,
         ...(signal === undefined ? {} : { signal }),
@@ -925,7 +927,7 @@ export function compose(env: AppEnvironment): Composed {
       if (connectionId !== "") {
         const linked = library.connections.get(connectionId);
         if (linked === undefined) throw new Error(`没有这个连接：${connectionId}。`);
-        const problem = connectionMismatch(agent.backend, linked.backend, linked.displayName);
+        const problem = connectionCompatibility(agent.backend, linked);
         if (problem !== undefined) throw new Error(problem);
       }
       const template = { ...agent, connectionId: connectionId === "" ? undefined : connectionId };

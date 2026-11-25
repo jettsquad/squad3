@@ -25,7 +25,7 @@
  * The patch is a file on disk; a secret written there would outlive the run.
  */
 
-import { isDeepSeekModel, type ReasoningEffort } from "../../../shared/index.ts";
+import { isDeepSeekModel, type InferenceProtocol, type ReasoningEffort } from "../../../shared/index.ts";
 
 /**
  * The heartbeat plugin's row, by absolute path.
@@ -77,6 +77,7 @@ export const COMPAT_API_KEY_ENV = "SQUAD_LLM_API_KEY";
 export { isDeepSeekModel };
 
 export interface PatchInput {
+  readonly protocol?: InferenceProtocol | undefined;
   /** Empty means the profile's own default model (DeepSeek's). */
   readonly model: string;
   /** Empty means the profile's own default endpoint. */
@@ -116,6 +117,12 @@ export function isDeepSeekPublicEndpoint(endpoint: string): boolean {
 
 export function buildDshPatch(input: PatchInput): string | undefined {
   const model = input.model.trim();
+  const native =
+    input.protocol === undefined ? model === "" || isDeepSeekModel(model) : input.protocol === "deepseek-native";
+  const compatProtocol =
+    input.protocol === "anthropic-messages" || input.protocol === "openai-responses"
+      ? input.protocol
+      : "openai-completions";
   // DeepSeek's own endpoint is left for dsh to choose. Which path that is
   // belongs to the dsh version, not to the connection: 0.1.x posted to
   // `https://api.deepseek.com/chat/completions`, and 0.2 speaks the Messages
@@ -124,10 +131,17 @@ export function buildDshPatch(input: PatchInput): string | undefined {
   // `https://api.deepseek.com/v1/messages` — and every seat on DeepSeek's own
   // model answered 「HTTP_404: DeepSeek Messages request failed」 the day dsh
   // was upgraded. A gateway's address is still passed through as given.
-  const official = isDeepSeekModel(model) || model === "" ? isDeepSeekPublicEndpoint(input.baseUrl) : false;
-  const baseUrl = official ? "" : input.baseUrl.trim();
+  const official = native && isDeepSeekPublicEndpoint(input.baseUrl);
+  const fallback =
+    input.protocol === undefined || native
+      ? ""
+      : compatProtocol === "anthropic-messages"
+        ? "https://api.anthropic.com"
+        : "https://api.openai.com/v1";
+  const baseUrl = official ? "" : input.baseUrl.trim() || fallback;
   const effort = input.effort;
-  if (model === "" && effort === undefined) return undefined;
+  if (model === "" && effort === undefined && (input.protocol === undefined || !native || baseUrl === ""))
+    return undefined;
 
   const deepseek = (): readonly string[] => {
     const config = [
@@ -140,7 +154,7 @@ export function buildDshPatch(input: PatchInput): string | undefined {
   const lines: readonly string[] =
     model === ""
       ? deepseek()
-      : isDeepSeekModel(model)
+      : native
         ? [
             "- id: agent-default-model",
             "  config:",
@@ -159,7 +173,7 @@ export function buildDshPatch(input: PatchInput): string | undefined {
             `      ${COMPAT_ROUTE}:`,
             "        displayName: Squad OpenAI-compatible",
             `        apiKeyEnv: ${COMPAT_API_KEY_ENV}`,
-            "        api: openai-completions",
+            `        api: ${compatProtocol}`,
             `        baseURL: ${JSON.stringify(baseUrl)}`,
             ...(effort === undefined ? [] : [`        reasoning: ${effort}`]),
             "        models:",

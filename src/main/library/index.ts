@@ -18,7 +18,9 @@ import {
   credentialRefFor,
   credentialRefProblem,
   envForConnection,
+  normalizeConnection,
   type AgentTemplate,
+  type ConnectionBackend,
   type ConnectionView,
   type PromptBlock,
   type SeatConnection,
@@ -69,7 +71,7 @@ export interface Library {
     views(): readonly ConnectionView[];
     setCredential(connectionId: string, value: string): void;
     /** Resolved per call, never cached: a rotated key reaches the next turn. */
-    envFor(connectionId: string): Readonly<Record<string, string>>;
+    envFor(connectionId: string, harness?: ConnectionBackend): Readonly<Record<string, string>>;
   };
   readonly agents: {
     /** Live templates, in the order the library shows them. */
@@ -133,23 +135,24 @@ export function createLibrary(options: {
     list: () =>
       Object.values(load<SeatConnection>(connectionsFile))
         .sort((a, b) => a.createdAt - b.createdAt)
-        .map(({ createdAt: _createdAt, ...connection }) => connection),
+        .map(({ createdAt: _createdAt, ...connection }) => normalizeConnection(connection)),
     get: (connectionId) => {
       const found = load<SeatConnection>(connectionsFile)[connectionId];
       if (found === undefined) return undefined;
       const { createdAt: _createdAt, ...connection } = found;
-      return connection;
+      return normalizeConnection(connection);
     },
     save: (input) => {
       // A person has a key, not a name for one; the name is bookkeeping the
       // system does for itself (2.x §7.6). Only derived when none was chosen —
       // a chosen name is the "this key is already in my environment" case.
-      const connection: SeatConnection =
+      const prepared =
         input.source !== "octopus" && input.authMode === "api-key" && (input.credentialRef ?? "").trim() === ""
           ? { ...input, credentialRef: credentialRefFor(input.connectionId) }
           : input;
-      const problems = checkConnection(connection);
+      const problems = checkConnection(prepared);
       if (problems.length > 0) throw new Error(problems.map((problem) => problem.detail).join("\n"));
+      const connection = normalizeConnection(prepared);
       const all = load<SeatConnection>(connectionsFile);
       all[connection.connectionId] = {
         ...connection,
@@ -190,13 +193,13 @@ export function createLibrary(options: {
       options.vault.set(ref, value);
       changed();
     },
-    envFor: (connectionId) => {
+    envFor: (connectionId, harness) => {
       const connection = connections.get(connectionId);
       if (connection === undefined) throw new Error(`没有这个连接：${connectionId}。`);
       if (connection.source === "octopus") return {};
-      if (connection.authMode === "subscription") return envForConnection(connection);
+      if (connection.authMode === "subscription") return envForConnection(connection, undefined, harness);
       const ref = (connection.credentialRef ?? "").trim();
-      return envForConnection(connection, ref === "" ? undefined : options.vault.resolve(ref));
+      return envForConnection(connection, ref === "" ? undefined : options.vault.resolve(ref), harness);
     },
   };
 

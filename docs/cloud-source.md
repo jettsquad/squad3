@@ -57,6 +57,10 @@ Squad 3 新增运行来源 `octopus`，首个后端为 Codex。未填写来源�
 
 真实样例证据在本机 .tmp/cloud-live-result.json 和 .tmp/cloud-compose-result.json；它们是本地实验记录，不作为测试夹具提交。文档中的实测不等于整个云端 MVP 验收已完成。
 
-当前边界：只接 Codex；不支持云端席位开启本机 hostCustomizations 或 subagents，开启时明确拒绝。MiniMax 的思考档位必须由该模型支持，首个配置实测使用 low。unelevated 的网络/读路径隔离有限，部分启动子进程的测试可能报 EPERM，需按所选本地权限和执行环境排查；不通过关闭权限来自动补救。自动恢复、跨后端和完整云端转录清理不在本次接入完成声明内。
+连接库只管理推理来源：API 协议、端点、模型和认证，或者 Octopus 的云端会话。Agent 库独立选择推理连接和本机 Harness。旧连接按原有路由识别协议，连接 ID 与密钥引用不变。
+
+当前本机适配：Codex 支持 OpenAI Responses，Claude Code 支持 Anthropic Messages，DeepSeek Harness 支持 DeepSeek 官方接口和通过 API key 使用显式指定模型的 Responses、Messages（x-api-key）与 Chat Completions。Octopus 的工具回调目前只接到本机 Codex Harness；选择未接入的组合时，Agent 库会说明原因。
+
+本机命令可以使用工作站 PATH 中的程序。Claude 配置开关不影响 Octopus，云端原生子 Agent 保持关闭。自定义 MCP 工具仍需通过本机 Harness 单独接入。MiniMax 的思考档位必须由该模型支持，首个配置实测使用 low。unelevated 的网络/读路径隔离有限，部分启动子进程的测试可能报 EPERM，需按所选本地权限和执行环境排查；不通过关闭权限来自动补救。自动恢复和完整云端转录清理不在本次接入完成声明内。
 
 新版连接界面的控件树可读取，截图工具报 `window capture timed out`，界面点选/保存/编辑的手动实测未完成；没有将对应清单勾为通过。主进程实际 IPC 保存/读取与上述真实模型调用已经验证。

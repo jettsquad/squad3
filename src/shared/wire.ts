@@ -15,6 +15,7 @@ import { CLAUDE_PERMISSION_MODES, CODEX_PERMISSION_MODES } from "./agent-templat
 import { AgendaSpecSchema } from "./agenda.ts";
 import { REASONING_EFFORTS } from "./reasoning-effort.ts";
 import { TeamPlanSchema } from "./team-plan.ts";
+import { INFERENCE_PROTOCOLS } from "./connection.ts";
 
 const usage = z.object({
   inputTokens: z.number(),
@@ -41,7 +42,8 @@ const connection = z
     connectionId: z.string().trim().min(1),
     displayName: z.string().trim().min(1, "连接名不能是空的。"),
     authMode: z.enum(["subscription", "api-key"]),
-    backend,
+    protocol: z.enum(INFERENCE_PROTOCOLS).optional(),
+    backend: backend.optional(),
     source: z.enum(["local", "octopus"]).optional(),
     cloud: z
       .object({

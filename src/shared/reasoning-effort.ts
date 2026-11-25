@@ -50,6 +50,8 @@ export interface EffortTarget {
   readonly model?: string | undefined;
   /** For codex: the levels Codex's model cache lists for `model`, when it lists them. */
   readonly codexLevels?: readonly string[] | undefined;
+  /** Explicit when a DSH connection declares a protocol. */
+  readonly dshNative?: boolean | undefined;
 }
 
 /** The levels this backend and model actually accept. */
@@ -62,7 +64,8 @@ export function reasoningEffortsFor(target: EffortTarget): readonly ReasoningEff
       return known.length === 0 ? CODEX_FALLBACK : REASONING_EFFORTS.filter((level) => known.includes(level));
     }
     case "dsh":
-      return target.model === undefined || target.model.trim() === "" || isDeepSeekModel(target.model)
+      return (target.dshNative ??
+        (target.model === undefined || target.model.trim() === "" || isDeepSeekModel(target.model)))
         ? DSH_DEEPSEEK
         : DSH_COMPATIBLE;
   }
