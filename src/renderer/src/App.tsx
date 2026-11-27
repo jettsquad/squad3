@@ -1,7 +1,7 @@
 /**
  * App.tsx — the workbench: teams and the libraries on the left, the selected page in the middle.
  */
-import { useEffect, useRef, useState, type JSX } from "react";
+import { useCallback, useEffect, useRef, useState, type JSX } from "react";
 import type { TeamSummary } from "../../shared/wire.ts";
 import { AgentsPage } from "./AgentsPage.tsx";
 import { ArchivePage } from "./ArchivePage.tsx";
@@ -37,6 +37,7 @@ export function App(): JSX.Element {
   const [teams, setTeams] = useState<readonly TeamSummary[]>([]);
   const [problems, setProblems] = useState<readonly string[]>([]);
   const [selection, setSelection] = useState<Selection>({ kind: "none" });
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(() => new Set());
   const load = useAction();
   const reorder = useAction();
   const openSession = useAction();
@@ -111,10 +112,14 @@ export function App(): JSX.Element {
   }
   const currentGroup = current?.groupId;
   const currentSession = current?.teamId;
+  const expandGroup = useCallback((groupId: string) => {
+    setExpandedGroups((previous) => (previous.has(groupId) ? previous : new Set([...previous, groupId])));
+  }, []);
   useEffect(() => {
-    if (currentGroup !== undefined && currentSession !== undefined)
-      lastSession.current.set(currentGroup, currentSession);
-  }, [currentGroup, currentSession]);
+    if (currentGroup === undefined || currentSession === undefined) return;
+    lastSession.current.set(currentGroup, currentSession);
+    expandGroup(currentGroup);
+  }, [currentGroup, currentSession, expandGroup]);
   const nav = (
     kind: "agents" | "blocks" | "connections" | "criteria" | "settings" | "archive" | "inbox",
     label: string,
@@ -176,15 +181,19 @@ export function App(): JSX.Element {
           {groups.map((sessions, index) => {
             const lead = sessions[0];
             if (lead === undefined) return null;
-            const open = current?.groupId === lead.groupId;
+            const active = currentGroup === lead.groupId;
+            const open = expandedGroups.has(lead.groupId);
+            const sessionListId = `team-sessions-${lead.groupId}`;
+            const toggleLabel = t(open ? "收起「{name}」的会话" : "展开「{name}」的会话", { name: lead.displayName });
             return (
               <div key={lead.groupId}>
-                <div className={`team-item ${open && sessions.length === 1 ? "selected" : ""} ${open ? "open" : ""}`}>
+                <div className={`team-item ${active && !open ? "selected" : ""} ${open ? "open" : ""}`}>
                   <button
                     type="button"
                     className="team-name"
                     title={lead.displayName}
                     onClick={() => {
+                      expandGroup(lead.groupId);
                       // Back to the session last open in this team, else its newest.
                       const remembered = lastSession.current.get(lead.groupId);
                       const target = sessions.find((one) => one.teamId === remembered) ?? sessions.at(-1) ?? lead;
@@ -195,7 +204,7 @@ export function App(): JSX.Element {
                     <span className="name">{lead.displayName}</span>
                     {sessions.length > 1 && !open && <span className="count">{sessions.length}</span>}
                   </button>
-                  {open && groups.length > 1 && (
+                  {active && open && groups.length > 1 && (
                     <span className="order">
                       <button
                         type="button"
@@ -217,41 +226,57 @@ export function App(): JSX.Element {
                       </button>
                     </span>
                   )}
+                  <button
+                    type="button"
+                    className="team-expand"
+                    aria-controls={sessionListId}
+                    aria-expanded={open}
+                    aria-label={toggleLabel}
+                    title={toggleLabel}
+                    onClick={() =>
+                      setExpandedGroups((previous) => {
+                        const next = new Set(previous);
+                        if (next.has(lead.groupId)) next.delete(lead.groupId);
+                        else next.add(lead.groupId);
+                        return next;
+                      })
+                    }
+                  >
+                    <span aria-hidden="true">{open ? "▾" : "▸"}</span>
+                  </button>
                 </div>
-                {open && (
-                  <div className="session-list">
-                    {sessions.length > 1 &&
-                      sessions.map((session) => (
-                        <button
-                          type="button"
-                          key={session.teamId}
-                          className={`team-item session ${current?.teamId === session.teamId ? "selected" : ""}`}
-                          title={session.sessionLabel}
-                          onClick={() => setSelection({ kind: "team", teamId: session.teamId })}
-                        >
-                          <span className={`dot ${session.busy ? "busy" : ""}`} />
-                          <span className="name">{session.sessionLabel}</span>
-                        </button>
-                      ))}
+                <div className="session-list" id={sessionListId} hidden={!open}>
+                  {sessions.map((session) => (
                     <button
                       type="button"
-                      className="team-item session add"
-                      disabled={openSession.busy}
-                      title={t(
-                        "同一队人、同一个项目，另起一段讨论：名册、提示词、资料跟着团队走，讨论记录和用量各算各的",
-                      )}
-                      onClick={() =>
-                        void openSession.run(async () => {
-                          const opened = await call("sessions.open", { teamId: lead.teamId });
-                          await refresh();
-                          setSelection({ kind: "team", teamId: opened.teamId });
-                        })
-                      }
+                      key={session.teamId}
+                      className={`team-item session ${current?.teamId === session.teamId ? "selected" : ""}`}
+                      aria-current={currentSession === session.teamId ? "true" : undefined}
+                      title={session.sessionLabel}
+                      onClick={() => setSelection({ kind: "team", teamId: session.teamId })}
                     >
-                      {t("＋ 新会话")}
+                      <span className={`dot ${session.busy ? "busy" : ""}`} />
+                      <span className="name">{session.sessionLabel}</span>
                     </button>
-                  </div>
-                )}
+                  ))}
+                  <button
+                    type="button"
+                    className="team-item session add"
+                    disabled={openSession.busy}
+                    title={t(
+                      "同一队人、同一个项目，另起一段讨论：名册、提示词、资料跟着团队走，讨论记录和用量各算各的",
+                    )}
+                    onClick={() =>
+                      void openSession.run(async () => {
+                        const opened = await call("sessions.open", { teamId: lead.teamId });
+                        await refresh();
+                        setSelection({ kind: "team", teamId: opened.teamId });
+                      })
+                    }
+                  >
+                    {t("＋ 新会话")}
+                  </button>
+                </div>
               </div>
             );
           })}

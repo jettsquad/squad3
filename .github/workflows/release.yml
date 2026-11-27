@@ -95,5 +95,7 @@ jobs:
             note=$'修复 macOS 的「检查更新」。新版能检测较新的兼容版本并提供对应 DMG 的下载按钮。从旧版升级到此版需先手动安装。\n\n'"$note"
           elif [[ "$GITHUB_REF_NAME" == "v3.0.0-dev.10" ]]; then
             note=$'连接库只配置推理来源。Agent 库可独立选择推理连接和本机 Harness，现有配置会保留。Octopus 目前仍通过本机 Codex Harness 执行工具。\n\n'"$note"
+          elif [[ "$GITHUB_REF_NAME" == "v3.0.0-dev.11" ]]; then
+            note=$'会话发言显示日期和时间；侧栏可同时展开多个团队的会话；Agent 运行状态移到右侧栏，避免顶部状态变化挤动对话区。\n\n'"$note"
           fi
           gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes --notes "$note" "${flags[@]}"

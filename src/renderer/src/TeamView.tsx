@@ -69,27 +69,49 @@ function seatStatus(seat: SeatSummary, now: number = Date.now()): string {
   return seat.continuing ? t("待命 · 续接会话") : t("待命");
 }
 
-/**
- * The team in one sentence: who is doing what, or that it is idle (2.x
- * team-view.tsx `statusLine`). The agenda's stage joins this in phase 4.
- */
-function statusLine(team: TeamSummary, now: number = Date.now()): string {
-  const working = team.seats.filter((seat) => seat.working);
-  if (working.length > 0) {
-    return working
-      .map((seat) => {
-        const said =
-          seat.doing === undefined
-            ? t("{name}在答", { name: seat.displayName })
-            : t("{name}在{doing}", { name: seat.displayName, doing: seat.doing });
-        const running = runningText(seat, now);
-        return running === "" ? said : `${said}（${running}）`;
-      })
-      .join(t("；"));
-  }
+function statusLine(team: TeamSummary, working: number): string {
+  if (working > 0) return t("{n} 个 Agent 运行中", { n: working });
   if (team.busy) return t("准备中（新开会话前先折叠）");
   const queued = team.commands.filter((command) => command.state === "queued").length;
   return queued > 0 ? t("{n} 条指令在排队", { n: queued }) : t("空闲");
+}
+
+function SeatRuntimePanel({ team }: { readonly team: TeamSummary }): JSX.Element {
+  const [now, setNow] = useState(() => Date.now());
+  const working = team.seats.filter((seat) => seat.working).length;
+  const anyWorking = working > 0;
+  useEffect(() => {
+    if (!anyWorking) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [anyWorking]);
+
+  return (
+    <section className="panel runtime-panel">
+      <div className="panel-title">{t("Agent 运行状态")}</div>
+      <div className="muted">{statusLine(team, working)}</div>
+      <ul className="runtime-list">
+        {team.seats.map((seat) => (
+          <li
+            key={seat.seatId}
+            title={seat.answering === undefined ? undefined : t("在答：{text}", { text: seat.answering })}
+          >
+            <div className="runtime-name">
+              <span className={`dot ${seat.working ? "busy" : ""}`} aria-hidden="true" />
+              <strong>
+                {seat.isSecretary ? "★ " : ""}
+                {seat.displayName}
+              </strong>
+              {seat.problem !== undefined && <span title={seat.problem}>⚠️</span>}
+            </div>
+            <div className="muted">{seatStatus(seat, now)}</div>
+            {seat.quiet !== undefined && <div className="notice">{seat.quiet}</div>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 /** What one seat was handed for one command, straight from the log. */
@@ -159,7 +181,7 @@ const Line = memo(function Line(props: {
         <div className="who">
           <strong>{t("上下文检查点")}</strong>
           <span>{line.revoked === true ? t("已作废：被折叠的原文重新进入上下文") : t("此前的讨论由它代替")}</span>
-          <span>{new Date(line.at).toLocaleTimeString()}</span>
+          <span>{new Date(line.at).toLocaleString()}</span>
         </div>
         <details>
           <summary className="muted">{t("展开要点")}</summary>
@@ -191,7 +213,7 @@ const Line = memo(function Line(props: {
             voiceId={team.seats.find((seat) => seat.seatId === line.seatId)?.voiceId ?? defaultVoiceFor(line.speaker)}
           />
         )}
-        <span>{new Date(line.at).toLocaleTimeString()}</span>
+        <span>{new Date(line.at).toLocaleString()}</span>
         {line.kind !== "system" && (
           // Pointed at for the next command: ADDITIVE on top of what each
           // seat already carries (2.x quotes.ts).
@@ -343,16 +365,6 @@ export function TeamView(props: {
 }): JSX.Element {
   const { team } = props;
   const [shown, setShown] = useState<string | undefined>(props.arrivalNote);
-  // A seat deep in tools can go an hour without changing anything else on
-  // screen; the elapsed time is redrawn on its own while anyone is working.
-  const [now, setNow] = useState(() => Date.now());
-  const anyWorking = team.seats.some((seat) => seat.working);
-  useEffect(() => {
-    if (!anyWorking) return undefined;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, [anyWorking]);
   const tick = useTeamChanges(team.teamId);
   const { library } = useLibrary();
   const designer = useDesignerStatus(team.teamId, tick);
@@ -562,33 +574,7 @@ export function TeamView(props: {
               }}
             />
           )}
-          <div className="muted">
-            {team.projectFolder} · {statusLine(team, now)}
-          </div>
-          {team.seats
-            .filter((seat) => seat.quiet !== undefined)
-            .map((seat) => (
-              <div className="notice" key={`quiet-${seat.seatId}`}>
-                {seat.displayName}：{seat.quiet}
-              </div>
-            ))}
-          <div className="roster">
-            {team.seats.map((seat) => (
-              <span
-                className="chip"
-                key={seat.seatId}
-                title={seat.answering === undefined ? "" : t("在答：{text}", { text: seat.answering })}
-              >
-                <span className={`dot ${seat.working ? "busy" : ""}`} />
-                {seat.isSecretary ? "★ " : ""}
-                {seat.displayName}
-                {seat.problem !== undefined && <span title={seat.problem}>⚠️</span>}
-                <span className="muted">
-                  {seat.role} · {seat.backend} · {seatStatus(seat, now)}
-                </span>
-              </span>
-            ))}
-          </div>
+          <div className="muted">{team.projectFolder}</div>
         </div>
 
         <div className="transcript-wrap">
@@ -824,6 +810,7 @@ export function TeamView(props: {
         </div>
       </div>
       <aside id="team-details" className="side" hidden={!props.detailsOpen}>
+        {props.detailsOpen && <SeatRuntimePanel team={team} />}
         <AgendaPanel team={team} />
         <ArtifactReview team={team} />
         {designer?.designer === true && <DesignerPanel team={team} />}

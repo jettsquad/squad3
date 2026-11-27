@@ -253,13 +253,6 @@ textarea {
   font-size: 12px;
 }
 
-.roster {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
 .chip {
   display: inline-flex;
   align-items: center;
@@ -450,6 +443,24 @@ textarea {
 .panel-title {
   font-weight: 600;
   margin-bottom: 6px;
+}
+
+.runtime-panel {
+  overflow-wrap: anywhere;
+}
+
+.runtime-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.runtime-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .meter {
@@ -782,6 +793,20 @@ input.narrow {
 
 .team-name:hover:not(:disabled) {
   background: none;
+}
+
+.team-expand {
+  flex: none;
+  align-self: stretch;
+  min-width: 28px;
+  border: none;
+  background: none;
+  color: var(--text-3);
+  padding: 0 8px;
+}
+
+.team-expand:hover:not(:disabled) {
+  color: var(--accent);
 }
 
 .order {
